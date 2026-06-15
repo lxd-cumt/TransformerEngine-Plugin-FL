@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: transformer-engine-plugin-fl
-Version: 0.1.0
-Summary: TransformerEngine Plugin System — backend dispatch and implementations
-Requires-Python: >=3.8
-Requires-Dist: torch
-Dynamic: requires-dist
-Dynamic: requires-python
-Dynamic: summary
