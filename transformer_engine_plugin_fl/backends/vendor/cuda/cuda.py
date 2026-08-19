@@ -2008,3 +2008,334 @@ class CUDABackend(TEFLBackendBase):
             use_ce,
             aggregate,
         )
+
+    # =====================================================================
+    # New ops added for TE main alignment
+    # =====================================================================
+
+    def bulk_allocate(
+        self,
+        shapes: List[List[int]],
+        dtypes: List[torch.dtype],
+        device: Optional[torch.device] = None,
+        alignments: Optional[List[int]] = None,
+    ) -> List[torch.Tensor]:
+        tex = self._get_tex()
+        return tex.bulk_allocate(shapes, dtypes, device, alignments)
+
+    def copy_data_ptrs_to_device(
+        self,
+        tensors: List[torch.Tensor],
+        device: torch.device,
+    ) -> torch.Tensor:
+        tex = self._get_tex()
+        return tex.copy_data_ptrs_to_device(tensors, device)
+
+    def create_empty_quantized_tensor(
+        self,
+        quantizer: Any,
+        shape: List[int],
+        dtype: torch.dtype,
+        device: torch.device,
+        pin_memory: bool,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.create_empty_quantized_tensor(quantizer, shape, dtype, device, pin_memory)
+
+    def cusolvermp_ctx_create(
+        self,
+        nccl_comm_ptr: int,
+        nranks: int,
+        rank: int,
+    ) -> int:
+        tex = self._get_tex()
+        return tex.cusolvermp_ctx_create(nccl_comm_ptr, nranks, rank)
+
+    def cusolvermp_ctx_destroy(self, ctx_ptr: int) -> None:
+        tex = self._get_tex()
+        return tex.cusolvermp_ctx_destroy(ctx_ptr)
+
+    def device_supports_multicast(self, device_id: int = -1) -> bool:
+        tex = self._get_tex()
+        return tex.device_supports_multicast(device_id)
+
+    def fused_moe_aux_loss_fwd_graph_safe(
+        self,
+        probs: torch.Tensor,
+        tokens_per_expert: torch.Tensor,
+        total_num_tokens: torch.Tensor,
+        num_experts: int,
+        num_rows: int,
+        num_cols: int,
+        topk: int,
+        coeff: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        tex = self._get_tex()
+        return tex.fused_moe_aux_loss_fwd_graph_safe(
+            probs, tokens_per_expert, total_num_tokens,
+            num_experts, num_rows, num_cols, topk, coeff,
+        )
+
+    def get_grouped_gemm_setup_workspace_size(self, num_gemms: int) -> int:
+        tex = self._get_tex()
+        return tex.get_grouped_gemm_setup_workspace_size(num_gemms)
+
+    def get_stream_priority_range(self, device_id: int = -1) -> Tuple[int, int]:
+        tex = self._get_tex()
+        return tex.get_stream_priority_range(device_id)
+
+    def group_dequantize(self, input: Any, otype: DType) -> Any:
+        tex = self._get_tex()
+        otype = tex.DType(int(otype)) if otype is not None else None
+        return tex.group_dequantize(input, otype)
+
+    def group_requantize_inplace(
+        self,
+        grouped_x: Any,
+        quantizer: Any,
+        num_tensors: int,
+        first_dims: Optional[torch.Tensor],
+        otype: DType,
+        tensor_offsets: Optional[torch.Tensor] = None,
+        return_dequantized: bool = False,
+    ) -> Any:
+        tex = self._get_tex()
+        otype = tex.DType(int(otype)) if otype is not None else None
+        return tex.group_requantize_inplace(
+            grouped_x, quantizer, num_tensors, first_dims, otype,
+            tensor_offsets, return_dequantized,
+        )
+
+    def multi_tensor_pad_last_dim(
+        self,
+        inputs: List[torch.Tensor],
+        alignment: int,
+    ) -> List[torch.Tensor]:
+        tex = self._get_tex()
+        return tex.multi_tensor_pad_last_dim(inputs, alignment)
+
+    def multi_tensor_swizzle_scales_for_gemm_(
+        self,
+        tensors: List[Any],
+        rowwise_usage: bool,
+        columnwise_usage: bool,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.multi_tensor_swizzle_scales_for_gemm_(tensors, rowwise_usage, columnwise_usage)
+
+    def multi_tensor_swizzle_scales_for_gemm_unchecked_(
+        self,
+        tensors: List[Any],
+        rowwise_usage: bool,
+        columnwise_usage: bool,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.multi_tensor_swizzle_scales_for_gemm_unchecked_(tensors, rowwise_usage, columnwise_usage)
+
+    def multi_tensor_transpose_to_bhsd(
+        self,
+        inputs: List[Optional[torch.Tensor]],
+        original_format: str,
+        outputs: Optional[List[Optional[torch.Tensor]]] = None,
+    ) -> List[Optional[torch.Tensor]]:
+        tex = self._get_tex()
+        if outputs is None:
+            outputs = []
+        return tex.multi_tensor_transpose_to_bhsd(inputs, original_format, outputs)
+
+    def newton_schulz(
+        self,
+        ctx_ptr: int,
+        m: int,
+        n: int,
+        x: torch.Tensor,
+        num_iterations: int,
+        coefficients: List[float],
+    ) -> None:
+        tex = self._get_tex()
+        return tex.newton_schulz(ctx_ptr, m, n, x, num_iterations, coefficients)
+
+    def nvfp4_2d_scale_transpose(
+        self,
+        input: torch.Tensor,
+        output: torch.Tensor,
+        M_tiles: int,
+        K_tiles: int,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.nvfp4_2d_scale_transpose(input, output, M_tiles, K_tiles)
+
+    def nvfp4_group_quantize_with_amax(
+        self,
+        tensor: torch.Tensor,
+        quantizer: Any,
+        num_tensors: int,
+        first_dims: Optional[torch.Tensor],
+        last_dims: Optional[torch.Tensor],
+        rowwise_amax: torch.Tensor,
+        columnwise_amax: torch.Tensor,
+        tensor_offsets: Optional[torch.Tensor] = None,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.nvfp4_group_quantize_with_amax(
+            tensor, quantizer, num_tensors, first_dims, last_dims,
+            rowwise_amax, columnwise_amax, tensor_offsets,
+        )
+
+    def nvfp4_quantize_with_amax(
+        self,
+        tensor: torch.Tensor,
+        quantizer: Any,
+        rowwise_amax: torch.Tensor,
+        columnwise_amax: torch.Tensor,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.nvfp4_quantize_with_amax(tensor, quantizer, rowwise_amax, columnwise_amax)
+
+    def nvte_built_with_cublasmp(self) -> bool:
+        tex = self._get_tex()
+        return tex.nvte_built_with_cublasmp()
+
+    def scaled_swiglu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        glu_interleave_size: int = 0,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.scaled_swiglu(input, act_scales, quantizer, glu_interleave_size)
+
+    def scaled_dswiglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        glu_interleave_size: int = 0,
+        compute_scale_grad: bool = True,
+    ) -> Tuple:
+        tex = self._get_tex()
+        return tex.scaled_dswiglu(
+            grad, fwd_input, act_scales, quantizer, glu_interleave_size, compute_scale_grad,
+        )
+
+    def scaled_srelu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.scaled_srelu(input, act_scales, quantizer)
+
+    def scaled_dsrelu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        compute_scale_grad: bool = True,
+    ) -> Tuple:
+        tex = self._get_tex()
+        return tex.scaled_dsrelu(grad, fwd_input, act_scales, quantizer, compute_scale_grad)
+
+    def scaled_clamped_swiglu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        limit: float = 7.0,
+        alpha: float = 1.7020000219345093,
+        glu_linear_offset: float = 1.0,
+        glu_interleave_size: int = 0,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.scaled_clamped_swiglu(
+            input, act_scales, quantizer, limit, alpha, glu_linear_offset, glu_interleave_size,
+        )
+
+    def scaled_clamped_dswiglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        limit: float = 7.0,
+        alpha: float = 1.7020000219345093,
+        glu_linear_offset: float = 1.0,
+        glu_interleave_size: int = 0,
+        compute_scale_grad: bool = True,
+    ) -> Tuple:
+        tex = self._get_tex()
+        return tex.scaled_clamped_dswiglu(
+            grad, fwd_input, act_scales, quantizer,
+            limit, alpha, glu_linear_offset, glu_interleave_size, compute_scale_grad,
+        )
+
+    def splits_to_offsets_multi(
+        self,
+        split_sizes: torch.Tensor,
+        device: torch.device,
+        *,
+        strides: List[int],
+        include_leading_zero: List[bool],
+        dtypes: List[torch.dtype],
+        bulk_allocate: bool = False,
+    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        tex = self._get_tex()
+        return tex.splits_to_offsets_multi(
+            split_sizes, device,
+            strides=strides,
+            include_leading_zero=include_leading_zero,
+            dtypes=dtypes,
+            bulk_allocate=bulk_allocate,
+        )
+
+    def thd_copy_valid_tokens_from_per_split_to_rank_local(
+        self,
+        src: torch.Tensor,
+        dst: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        valid_counts: torch.Tensor,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.thd_copy_valid_tokens_from_per_split_to_rank_local(
+            src, dst, cu_seqlens, valid_counts,
+        )
+
+    def thd_cp_rank_order_to_sequence_order(
+        self,
+        tensor: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        num_chunks: int,
+        head_dim: int,
+    ) -> torch.Tensor:
+        tex = self._get_tex()
+        return tex.thd_cp_rank_order_to_sequence_order(tensor, cu_seqlens, num_chunks, head_dim)
+
+    def thd_sequence_order_to_cp_rank_order(
+        self,
+        tensor: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        num_chunks: int,
+        head_dim: int,
+    ) -> torch.Tensor:
+        tex = self._get_tex()
+        return tex.thd_sequence_order_to_cp_rank_order(tensor, cu_seqlens, num_chunks, head_dim)
+
+    def ubuf_built_with_mpi(self) -> bool:
+        tex = self._get_tex()
+        return tex.ubuf_built_with_mpi()
+
+    def swizzle_scales_and_pack_ptrs_for_discrete_weights(
+        self,
+        data_tensors: List[torch.Tensor],
+        scale_tensors: List[torch.Tensor],
+        swizzle_type: str,
+        device: torch.device,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        tex = self._get_tex()
+        return tex.grouped_mlp_experimental.swizzle_scales_and_pack_ptrs_for_discrete_weights(
+            data_tensors, scale_tensors, swizzle_type, device,
+        )

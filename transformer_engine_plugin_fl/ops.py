@@ -16,22 +16,19 @@ logger = get_logger()
 ################### Enums ###################
 class DType(IntEnum):
     kByte = 0
-    kInt16 = 1
     kInt32 = 2
-    kInt64 = 3
     kFloat32 = 4
     kFloat16 = 5
     kBFloat16 = 6
     kFloat8E4M3 = 7
     kFloat8E5M2 = 8
-    kFloat8E8M0 = 9
     kFloat4E2M1 = 10
-    kNumTypes = 11
 
 
 class Float8BlockScaleTensorFormat(IntEnum):
     GEMM_READY = 0
     COMPACT = 1
+    INVALID = 2
 
 
 class NVTE_Activation_Type(IntEnum):
@@ -98,7 +95,6 @@ class NVTE_Mask_Type(IntEnum):
 
 class NVTE_Fused_Attn_Backend(IntEnum):
     NVTE_No_Backend = -1
-    NVTE_F16_max512_seqlen = 0
     NVTE_F16_arbitrary_seqlen = 1
     NVTE_FP8 = 2
 
@@ -111,6 +107,8 @@ class NVTE_QKV_Format(IntEnum):
     NVTE_SBHD_2BSHD = 4
     NVTE_THD_2BSHD = 5
     NVTE_THD_2SBHD = 6
+    NVTE_BHSD = 7
+    NVTE_QKV_Format_NOT_SET = 8
 
 
 class NVTE_QKV_Layout(IntEnum):
@@ -139,6 +137,7 @@ class NVTE_QKV_Layout(IntEnum):
     NVTE_Paged_KV_SBHD_SBHD_SBHD = 22
     NVTE_Paged_KV_THD_BSHD_BSHD = 23
     NVTE_Paged_KV_THD_SBHD_SBHD = 24
+    NVTE_BHSD_BHSD_BHSD = 25
 
 
 class CommOverlapType(IntEnum):
@@ -156,6 +155,11 @@ class CommOverlapAlgo(IntEnum):
     ATOMIC_GEMM_AG_P2P = 6
     ATOMIC_GEMM_RS_P2P = 7
     EXTERNAL_BULK_OVERLAP_AG = 8
+
+
+class NVTERoutingMapFormat(IntEnum):
+    BYTEMAP = 0
+    BITMAP_U8 = 1
 
 
 ############ Class #################
@@ -203,6 +207,30 @@ class CommOverlapP2P:
         from .manager import get_default_manager
 
         return get_default_manager().call("create_comm_overlap_p2p", *args, **kwargs)
+
+
+class CommOverlapBase:
+    """
+    CommOverlapBase stub for TE main compatibility.
+    """
+
+    pass
+
+
+class CommOverlapCore:
+    """
+    CommOverlapCore stub for TE main compatibility.
+    """
+
+    pass
+
+
+class CommOverlapP2PBase:
+    """
+    CommOverlapP2PBase stub for TE main compatibility.
+    """
+
+    pass
 
 
 class FlashAttentionBase(torch.nn.Module, ABC):

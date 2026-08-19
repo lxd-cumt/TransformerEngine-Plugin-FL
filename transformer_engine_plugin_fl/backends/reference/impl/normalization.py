@@ -15,9 +15,7 @@ __all__ = [
 # Mapping from DType enum to torch.dtype
 _DTYPE_TO_TORCH_DTYPE = {
     DType.kByte: torch.uint8,
-    DType.kInt16: torch.int16,
     DType.kInt32: torch.int32,
-    DType.kInt64: torch.int64,
     DType.kFloat32: torch.float32,
     DType.kFloat16: torch.float16,
     DType.kBFloat16: torch.bfloat16,
