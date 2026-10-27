@@ -9,8 +9,8 @@ import torch
 import torch.nn.functional as F
 import torch.distributed as dist
 
-from transformer_engine.plugin.core.ops import FlashAttentionBase
-from transformer_engine.plugin.core.backends.fa_utils import (
+from transformer_engine_plugin_fl.ops import FlashAttentionBase
+from transformer_engine_plugin_fl.backends.fa_utils import (
     all_gather_along_seq,
     reduce_scatter_along_seq,
     create_cp_causal_mask,
@@ -220,10 +220,13 @@ class FlashAttentionTorch(FlashAttentionBase):
         fp8: bool = False,
         fp8_meta: Optional[Dict[str, Any]] = None,
         quantizers: Optional[Any] = None,
+        pad_between_seqs: Optional[bool] = False,
         inference_params: Optional[Any] = None,
         flash_attention_backend: Optional[Any] = None,
         fp8_output: bool = False,
         num_splits: Optional[int] = 1,
+        cu_seqlens_q_padded: Optional[torch.Tensor] = None,
+        cu_seqlens_kv_padded: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Flash Attention implementation using PyTorch's scaled_dot_product_attention.
 

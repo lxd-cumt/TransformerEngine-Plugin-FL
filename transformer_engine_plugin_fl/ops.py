@@ -14,6 +14,9 @@ logger = get_logger()
 
 
 ################### Enums ###################
+# Mirrors the DType values exposed by NVTE_DECLARE_COMMON_PYBIND11_HANDLES in
+# transformer_engine/common/util/pybind_helper.h. kInt16/kInt64 exist in the C++
+# enum but are deliberately not bound there, so they are absent here too.
 class DType(IntEnum):
     kByte = 0
     kInt32 = 2
@@ -22,7 +25,23 @@ class DType(IntEnum):
     kBFloat16 = 6
     kFloat8E4M3 = 7
     kFloat8E5M2 = 8
+    kFloat8E8M0 = 9
     kFloat4E2M1 = 10
+    kFloat8UE5M3 = 11
+
+
+class NVTEScalingMode(IntEnum):
+    NVTE_DELAYED_TENSOR_SCALING = 0
+    NVTE_MXFP8_1D_SCALING = 1
+    NVTE_BLOCK_SCALING_1D = 2
+    NVTE_BLOCK_SCALING_2D = 3
+    NVTE_NVFP4_1D_SCALING = 4
+    NVTE_INVALID_SCALING = 100
+
+
+class NVTEQBHistogramMode(IntEnum):
+    TWO_KERNEL = 0
+    FUSED_ATOMIC = 1
 
 
 class Float8BlockScaleTensorFormat(IntEnum):
@@ -138,6 +157,7 @@ class NVTE_QKV_Layout(IntEnum):
     NVTE_Paged_KV_THD_BSHD_BSHD = 23
     NVTE_Paged_KV_THD_SBHD_SBHD = 24
     NVTE_BHSD_BHSD_BHSD = 25
+    NVTE_QKV_Layout_NOT_SET = 26
 
 
 class CommOverlapType(IntEnum):
@@ -562,6 +582,16 @@ class TEFLBackendBase(ABC):
         quantizer: Any,
         limit: float = 7.0,
         alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
+    ) -> Any:
+        raise NotImplementedError
+
+    def situglu(
+        self,
+        input: torch.Tensor,
+        quantizer: Any,
+        beta1: float = 4.0,
+        beta2: float = 25.0,
     ) -> Any:
         raise NotImplementedError
 
@@ -664,6 +694,134 @@ class TEFLBackendBase(ABC):
         quantizer: Any,
         limit: float = 7.0,
         alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
+    ) -> Any:
+        raise NotImplementedError
+
+    def dsituglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        quantizer: Any,
+        beta1: float = 4.0,
+        beta2: float = 25.0,
+    ) -> Any:
+        raise NotImplementedError
+
+    # Scaled activations #
+    def scaled_swiglu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        glu_interleave_size: int = 0,
+    ) -> Any:
+        raise NotImplementedError
+
+    def scaled_situglu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        beta1: float = 4.0,
+        beta2: float = 25.0,
+        glu_interleave_size: int = 0,
+    ) -> Any:
+        raise NotImplementedError
+
+    def scaled_clamped_swiglu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        limit: float = 7.0,
+        alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
+        glu_interleave_size: int = 0,
+    ) -> Any:
+        raise NotImplementedError
+
+    def scaled_srelu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+    ) -> Any:
+        raise NotImplementedError
+
+    def scaled_dswiglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        glu_interleave_size: int = 0,
+        compute_scale_grad: bool = True,
+    ) -> Any:
+        raise NotImplementedError
+
+    def scaled_dsituglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        beta1: float = 4.0,
+        beta2: float = 25.0,
+        glu_interleave_size: int = 0,
+        compute_scale_grad: bool = True,
+    ) -> Any:
+        raise NotImplementedError
+
+    def scaled_clamped_dswiglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        limit: float = 7.0,
+        alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
+        glu_interleave_size: int = 0,
+        compute_scale_grad: bool = True,
+    ) -> Any:
+        raise NotImplementedError
+
+    def scaled_dsrelu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        compute_scale_grad: bool = True,
+    ) -> Any:
+        raise NotImplementedError
+
+    # Grouped scaled activations #
+    def group_scaled_swiglu(
+        self,
+        input_2h: torch.Tensor,
+        prob: torch.Tensor,
+        quantizer: Any,
+        num_tensors: int,
+        first_dims: Optional[List[int]] = None,
+        last_dims: Optional[List[int]] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
+    ) -> Any:
+        raise NotImplementedError
+
+    def group_scaled_clamped_swiglu(
+        self,
+        input_2h: torch.Tensor,
+        prob: torch.Tensor,
+        quantizer: Any,
+        num_tensors: int,
+        limit: float,
+        alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
+        first_dims: Optional[List[int]] = None,
+        last_dims: Optional[List[int]] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
     ) -> Any:
         raise NotImplementedError
 
@@ -756,7 +914,7 @@ class TEFLBackendBase(ABC):
     def scaled_softmax_forward(
         self,
         input: torch.Tensor,
-        scale: float,
+        scale_factor: float,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -808,7 +966,7 @@ class TEFLBackendBase(ABC):
 
     def scaled_aligned_causal_masked_softmax_backward(
         self,
-        output_grad_: torch.Tensor,
+        output_grads_: torch.Tensor,
         softmax_results_: torch.Tensor,
         scale_factor: float,
     ) -> torch.Tensor:
@@ -890,6 +1048,10 @@ class TEFLBackendBase(ABC):
         quantizer: Any,
         num_tensors: int,
         first_dims: List[int],
+        last_dims: Optional[List[int]] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
+        noop_flag: Optional[torch.Tensor] = None,
+        output: Optional[Any] = None,
     ) -> Any:
         raise NotImplementedError
 
@@ -899,6 +1061,71 @@ class TEFLBackendBase(ABC):
         quantizer: Any,
         num_tensors: int,
         first_dims: List[int],
+        last_dims: Optional[List[int]] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
+    ) -> Any:
+        raise NotImplementedError
+
+    def group_dequantize(
+        self,
+        input: Any,
+        otype: DType,
+    ) -> Any:
+        raise NotImplementedError
+
+    def group_requantize_inplace(
+        self,
+        grouped_x: Any,
+        quantizer: Any,
+        num_tensors: int,
+        first_dims: List[int],
+        otype: DType,
+        tensor_offsets: Optional[torch.Tensor] = None,
+        return_dequantized: bool = False,
+    ) -> Any:
+        raise NotImplementedError
+
+    def create_empty_quantized_tensor(
+        self,
+        quantizer: Any,
+        shape: List[int],
+        dtype: torch.dtype,
+        device: Any,
+        pin_memory: bool,
+    ) -> Any:
+        raise NotImplementedError
+
+    def nvfp4_quantize_with_amax(
+        self,
+        tensor: torch.Tensor,
+        quantizer: Any,
+        rowwise_amax: Optional[torch.Tensor],
+        columnwise_amax: Optional[torch.Tensor],
+    ) -> Any:
+        raise NotImplementedError
+
+    def nvfp4_group_quantize_with_amax(
+        self,
+        tensor: torch.Tensor,
+        quantizer: Any,
+        num_tensors: int,
+        first_dims: List[int],
+        last_dims: Optional[List[int]] = None,
+        rowwise_amax: Optional[torch.Tensor] = None,
+        columnwise_amax: Optional[torch.Tensor] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
+    ) -> Any:
+        raise NotImplementedError
+
+    def nvfp4_gemm_swizzled_scales_alignment(
+        self,
+        optimize_for_gemm: bool,
+        with_rht: bool,
+        with_2d_quantization: bool,
+        row_scaled_nvfp4: bool,
+        nvfp4_use_4over6: bool,
+        sm_arch: int,
+        disable_rht_cast_fusion: bool,
     ) -> Any:
         raise NotImplementedError
 
@@ -926,7 +1153,7 @@ class TEFLBackendBase(ABC):
         pre_gelu_out: List[torch.Tensor],
         grad: bool,
         workspace: List[torch.Tensor],
-        workspaceSizes: int,
+        workspaceSize: int,
         accumulate: bool,
         use_split_accumulator: bool,
         math_sm_count: int,
@@ -958,6 +1185,7 @@ class TEFLBackendBase(ABC):
         self,
         input: torch.Tensor,
         dtype: DType,
+        *,
         out: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         raise NotImplementedError
@@ -965,15 +1193,26 @@ class TEFLBackendBase(ABC):
     def swap_first_dims(
         self,
         tensor: torch.Tensor,
-        out: Optional[torch.Tensor],
+        *,
+        out: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         raise NotImplementedError
 
     def nvfp4_data_transpose(
         self,
         input: torch.Tensor,
+        *,
         out: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        raise NotImplementedError
+
+    def nvfp4_2d_scale_transpose(
+        self,
+        input: torch.Tensor,
+        output: torch.Tensor,
+        M_tiles: int,
+        K_tiles: int,
+    ) -> None:
         raise NotImplementedError
 
     def swizzle_scales_for_gemm_(
@@ -988,6 +1227,64 @@ class TEFLBackendBase(ABC):
         rowwise: bool,
         columnwise: bool,
     ) -> None:
+        raise NotImplementedError
+
+    def multi_tensor_swizzle_scales_for_gemm_(
+        self,
+        tensors: List[Any],
+        rowwise_usage: bool,
+        columnwise_usage: bool,
+    ) -> None:
+        raise NotImplementedError
+
+    def multi_tensor_swizzle_scales_for_gemm_unchecked_(
+        self,
+        tensors: List[Any],
+        rowwise_usage: bool,
+        columnwise_usage: bool,
+    ) -> None:
+        raise NotImplementedError
+
+    def swizzle_scales_and_pack_ptrs_for_discrete_weights(
+        self,
+        data_tensors: List[torch.Tensor],
+        scale_tensors: List[torch.Tensor],
+        swizzle_type: Any,
+        device: Any,
+    ) -> Any:
+        """Member of the ``grouped_mlp_experimental`` submodule in TE main."""
+        raise NotImplementedError
+
+    # Tensor allocation
+    def bulk_allocate(
+        self,
+        shapes: List[List[int]],
+        dtypes: List[torch.dtype],
+        device: Optional[Any] = None,
+        alignments: Optional[List[int]] = None,
+    ) -> List[torch.Tensor]:
+        raise NotImplementedError
+
+    def copy_data_ptrs_to_device(
+        self,
+        tensors: List[torch.Tensor],
+        device: Any,
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+    def multi_tensor_pad_last_dim(
+        self,
+        inputs: List[torch.Tensor],
+        alignment: int,
+    ) -> List[torch.Tensor]:
+        raise NotImplementedError
+
+    def multi_tensor_transpose_to_bhsd(
+        self,
+        inputs: List[Optional[torch.Tensor]],
+        original_format: str,
+        outputs: Optional[List[Optional[torch.Tensor]]] = None,
+    ) -> List[Optional[torch.Tensor]]:
         raise NotImplementedError
 
     def convert_host_pointers_to_tensor(
@@ -1013,28 +1310,34 @@ class TEFLBackendBase(ABC):
     ) -> torch.Tensor:
         raise NotImplementedError
 
+    def splits_to_offsets_multi(
+        self,
+        split_sizes: List[int],
+        device: Any,
+        *,
+        strides: List[int],
+        include_leading_zero: bool,
+        dtypes: List[torch.dtype],
+        bulk_allocate: bool = False,
+    ) -> List[torch.Tensor]:
+        raise NotImplementedError
+
+    def get_grouped_gemm_setup_workspace_size(
+        self,
+        num_tensors: int,
+    ) -> int:
+        raise NotImplementedError
+
     def get_fused_attn_backend(
         self,
-        is_training: bool,
-        q_dtype: DType,
-        kv_dtype: DType,
-        qkv_layout: NVTE_QKV_Layout,
-        bias_type: NVTE_Bias_Type,
-        attn_mask_type: NVTE_Mask_Type,
-        softmax_type: NVTE_Softmax_Type,
-        p_dropout: float,
-        num_attn_heads: int,
-        num_gqa_groups: int,
-        max_seqlen_q: int,
-        max_seqlen_kv: int,
-        head_dim_qk: int,
-        head_dim_v: int,
-        window_size_left: int,
-        window_size_right: int,
-        return_max_logit: bool,
-        cuda_graph: bool = False,
-        deterministic: bool = False,
-    ) -> NVTE_Fused_Attn_Backend:
+        fused_attn_params: Any,
+    ) -> Tuple[NVTE_Fused_Attn_Backend, str]:
+        """Select a fused attention backend.
+
+        TE main passes a single parameter object whose attributes are read on the
+        C++ side (is_training, qkv_layout, o_format, scaling_mode, ... ) rather
+        than a flat argument list.
+        """
         raise NotImplementedError
 
     def compute_amax(
@@ -1082,25 +1385,25 @@ class TEFLBackendBase(ABC):
     # MXFP8 scaling
     def mxfp8_scaling_compute_partial_amax(
         self,
-        tensor: torch.Tensor,
-        amax: torch.Tensor,
-        h: int,
-        w: int,
+        input: torch.Tensor,
+        amax_rowwise: torch.Tensor,
+        amax_colwise: torch.Tensor,
+        rows: int,
+        cols: int,
         start_offset: int,
-        block_len: int,
     ) -> None:
         raise NotImplementedError
 
     def mxfp8_scaling_partial_cast(
         self,
-        inp: torch.Tensor,
-        out: torch.Tensor,
-        scale: torch.Tensor,
-        h: int,
-        w: int,
+        input: torch.Tensor,
+        output_rowwise: torch.Tensor,
+        output_colwise: torch.Tensor,
+        scale_inv_rowwise: torch.Tensor,
+        scale_inv_colwise: torch.Tensor,
+        rows: int,
+        cols: int,
         start_offset: int,
-        block_len: int,
-        out_dtype: DType,
     ) -> None:
         raise NotImplementedError
 
@@ -1130,29 +1433,45 @@ class TEFLBackendBase(ABC):
 
     def nvfp4_compute_global_scale(
         self,
-        global_amaxes: torch.Tensor,
-        global_scale_tensor: torch.Tensor,
+        global_amax: torch.Tensor,
+        global_scale: torch.Tensor,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         raise NotImplementedError
 
     def nvfp4_compute_per_block_scale(
         self,
-        *args,
-        **kwargs,
+        block_amax: torch.Tensor,
+        scale: torch.Tensor,
+        global_amax: torch.Tensor,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         raise NotImplementedError
 
     def nvfp4_expand_scale_to_fp8(
         self,
-        *args,
-        **kwargs,
+        input: torch.Tensor,
+        output: torch.Tensor,
+        tile_rows: int,
+        tile_cols: int,
+        rows_padded: int,
+        block_len: int,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         raise NotImplementedError
 
     def nvfp4_fused_scale(
         self,
-        *args,
-        **kwargs,
+        block_amax: torch.Tensor,
+        global_amax: torch.Tensor,
+        per_block_scale: torch.Tensor,
+        target_scale: torch.Tensor,
+        target_amax: torch.Tensor,
+        tile_rows: int,
+        tile_cols: int,
+        rows_padded: int,
+        block_len: int,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         raise NotImplementedError
 
@@ -1167,6 +1486,7 @@ class TEFLBackendBase(ABC):
         tile_cols_list: List[int],
         rows_padded_list: List[int],
         block_len: int,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         raise NotImplementedError
 
@@ -1180,14 +1500,21 @@ class TEFLBackendBase(ABC):
         w: int,
         start_offset: int,
         block_len: int = 16,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         raise NotImplementedError
 
     def nvfp4_multi_tensor_2d_partial_cast(
         self,
         inp_list: List[torch.Tensor],
-        *args,
-        **kwargs,
+        out_list: List[torch.Tensor],
+        scale_list: List[torch.Tensor],
+        global_scale_list: List[torch.Tensor],
+        h_list: List[int],
+        w_list: List[int],
+        start_offset_list: List[int],
+        block_len: int = 16,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         raise NotImplementedError
 
@@ -1244,11 +1571,13 @@ class TEFLBackendBase(ABC):
         p_dropout: float,
         set_zero: bool,
         qkv_layout: NVTE_QKV_Layout,
+        o_format: NVTE_QKV_Format,
+        qkv_scale_inv_format: NVTE_QKV_Format,
         bias_type: NVTE_Bias_Type,
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
         window_size: List[int],
-        bottom_right_diagonal: Optional[bool],
+        bottom_right_diagonal: bool,
         cu_seqlens_q: torch.Tensor,
         cu_seqlens_kv: torch.Tensor,
         Q: Any,
@@ -1278,11 +1607,16 @@ class TEFLBackendBase(ABC):
         p_dropout: float,
         set_zero: bool,
         qkv_layout: NVTE_QKV_Layout,
+        o_format: NVTE_QKV_Format,
+        do_format: NVTE_QKV_Format,
+        dqkv_layout: NVTE_QKV_Layout,
+        qkv_scale_inv_format: NVTE_QKV_Format,
+        do_scale_inv_format: NVTE_QKV_Format,
         bias_type: NVTE_Bias_Type,
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
         window_size: List[int],
-        bottom_right_diagonal: Optional[bool],
+        bottom_right_diagonal: bool,
         deterministic: bool,
         cu_seqlens_q: torch.Tensor,
         cu_seqlens_kv: torch.Tensor,
@@ -1292,7 +1626,6 @@ class TEFLBackendBase(ABC):
         O: Any,
         dO: Any,
         fake_dtype: torch.dtype,
-        dqkv_type: DType,
         Aux_CTX_Tensors: List[torch.Tensor],
         cu_seqlens_q_padded: Optional[torch.Tensor],
         cu_seqlens_kv_padded: Optional[torch.Tensor],
@@ -1312,7 +1645,7 @@ class TEFLBackendBase(ABC):
         page_table: torch.Tensor,
         cu_new_lens: torch.Tensor,
         cu_cached_lens: torch.Tensor,
-        qkv_format: NVTE_QKV_Format,
+        kv_format: NVTE_QKV_Format,
         b: int,
         max_ctx_len: int,
         max_seq_len: int,
@@ -1394,6 +1727,18 @@ class TEFLBackendBase(ABC):
     ) -> torch.Tensor:
         raise NotImplementedError
 
+    def fused_mla_kv_rope_mxfp8(
+        self,
+        kv: torch.Tensor,
+        k_rope: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        v_head_dim: int,
+        key_quantizer: Any,
+        value_quantizer: Any,
+    ) -> List[Any]:
+        raise NotImplementedError
+
     # fused router
     def fused_topk_with_score_function_fwd(
         self,
@@ -1405,13 +1750,28 @@ class TEFLBackendBase(ABC):
         scaling_factor: Optional[float],
         score_function: str,
         expert_bias: Optional[torch.Tensor],
+        routing_map_format: int = NVTERoutingMapFormat.BYTEMAP,
+        topk_indices: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        raise NotImplementedError
+
+    def fused_topk_with_score_function_qb_fwd(
+        self,
+        logits: torch.Tensor,
+        topk: int,
+        scaling_factor: Optional[float],
+        expert_bias: Optional[torch.Tensor],
+        routing_map_format: int,
+        topk_indices: Optional[torch.Tensor],
+        histogram: Optional[torch.Tensor],
+        bin_bounds: Optional[torch.Tensor],
+        histogram_mode: int,
+        bin_bounds_validated: bool = False,
+    ) -> Tuple[torch.Tensor, ...]:
         raise NotImplementedError
 
     def fused_topk_with_score_function_bwd(
         self,
-        num_tokens: int,
-        num_experts: int,
         routing_map: torch.Tensor,
         intermediate_output: torch.Tensor,
         grad_probs: torch.Tensor,
@@ -1420,6 +1780,8 @@ class TEFLBackendBase(ABC):
         use_pre_softmax: bool,
         scaling_factor: Optional[float],
         score_function: str,
+        use_dense_indices: bool = False,
+        routing_map_format: int = NVTERoutingMapFormat.BYTEMAP,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -1428,13 +1790,12 @@ class TEFLBackendBase(ABC):
         logits: torch.Tensor,
         topk: int,
         score_function: str,
+        routing_map_format: int = NVTERoutingMapFormat.BYTEMAP,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raise NotImplementedError
 
     def fused_score_for_moe_aux_loss_bwd(
         self,
-        num_tokens: int,
-        num_experts: int,
         intermediate_output: torch.Tensor,
         grad_scores: torch.Tensor,
         grad_logits: torch.Tensor,
@@ -1448,6 +1809,19 @@ class TEFLBackendBase(ABC):
         probs: torch.Tensor,
         tokens_per_expert: torch.Tensor,
         total_num_tokens: int,
+        num_experts: int,
+        num_rows: int,
+        num_cols: int,
+        topk: int,
+        coeff: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        raise NotImplementedError
+
+    def fused_moe_aux_loss_fwd_graph_safe(
+        self,
+        probs: torch.Tensor,
+        tokens_per_expert: torch.Tensor,
+        total_num_tokens: torch.Tensor,
         num_experts: int,
         num_rows: int,
         num_cols: int,
@@ -1488,10 +1862,54 @@ class TEFLBackendBase(ABC):
     def get_cublasLt_version(self) -> int:
         raise NotImplementedError
 
+    def get_cublasLt_build_version(self) -> int:
+        raise NotImplementedError
+
     def get_cudnn_version(self) -> int:
         raise NotImplementedError
 
     def get_num_cublas_streams(self) -> int:
+        raise NotImplementedError
+
+    def device_supports_multicast(self, device_id: int = -1) -> bool:
+        raise NotImplementedError
+
+    def get_stream_priority_range(self, device_id: int = -1) -> Tuple[int, int]:
+        raise NotImplementedError
+
+    def ubuf_built_with_mpi(self) -> bool:
+        raise NotImplementedError
+
+    def nvte_built_with_cublasmp(self) -> bool:
+        raise NotImplementedError
+
+    def nvte_cublasmp_version(self) -> int:
+        raise NotImplementedError
+
+    def get_nccl_comm_ptr(self, process_group: Any) -> int:
+        raise NotImplementedError
+
+    # Newton-Schulz (cuSolverMp)
+    def cusolvermp_ctx_create(
+        self,
+        nccl_comm_ptr: int,
+        nranks: int,
+        rank: int,
+    ) -> int:
+        raise NotImplementedError
+
+    def cusolvermp_ctx_destroy(self, ctx_ptr: int) -> None:
+        raise NotImplementedError
+
+    def newton_schulz(
+        self,
+        ctx_ptr: int,
+        m: int,
+        n: int,
+        x: torch.Tensor,
+        num_iterations: int,
+        coefficients: List[float],
+    ) -> None:
         raise NotImplementedError
 
     # Support THD format for Context Parallel
@@ -1525,6 +1943,7 @@ class TEFLBackendBase(ABC):
         self,
         out: torch.Tensor,
         out_per_step: torch.Tensor,
+        old_lse: torch.Tensor,
         lse: torch.Tensor,
         lse_per_step: torch.Tensor,
         cu_seqlens: torch.Tensor,
@@ -1550,6 +1969,33 @@ class TEFLBackendBase(ABC):
         world_size: int,
         rank: int,
     ) -> torch.Tensor:
+        raise NotImplementedError
+
+    def thd_sequence_order_to_cp_rank_order(
+        self,
+        inp: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        cp_size: int,
+        total_tokens: int,
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+    def thd_cp_rank_order_to_sequence_order(
+        self,
+        inp: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        cp_size: int,
+        total_tokens: int,
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+    def thd_copy_valid_tokens_from_per_split_to_rank_local(
+        self,
+        out: torch.Tensor,
+        inp: torch.Tensor,
+        cu_seqlens_padded: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+    ) -> None:
         raise NotImplementedError
 
     # nvshmem functions
@@ -1751,6 +2197,111 @@ class TEFLBackendBase(ABC):
     ) -> Any:
         raise NotImplementedError
 
+    ##### Expert-parallel (NCCL EP) #####
+    # TE main guards these behind `#ifdef NVTE_WITH_NCCL_EP`, so they are absent
+    # from a stock build. Backends should resolve them lazily and skip
+    # registration when the underlying symbol is missing.
+    def ep_initialize(
+        self,
+        comm_ptr: int,
+        group_name: str,
+        num_experts: int,
+        max_tokens_per_rank: int,
+        max_recv_tokens_per_rank: int,
+        hidden_dim: int,
+        max_num_sms: int = 0,
+        max_token_dtype: Any = None,
+        zero_copy: bool = False,
+        num_topk: int = 0,
+        drop_on_overflow: bool = False,
+    ) -> None:
+        raise NotImplementedError
+
+    def ep_finalize(self) -> None:
+        raise NotImplementedError
+
+    def ep_handle_mem_size(
+        self,
+        top_k: int,
+        dispatch_output_per_expert_alignment: int = 0,
+    ) -> int:
+        raise NotImplementedError
+
+    def ep_prepare(
+        self,
+        handle_mem: torch.Tensor,
+        topk_idx: torch.Tensor,
+        tokens_per_expert: torch.Tensor,
+        top_k: int,
+        dispatch_output_per_expert_alignment: int,
+        total_recv_tokens: torch.Tensor,
+    ) -> Any:
+        raise NotImplementedError
+
+    def ep_dispatch(
+        self,
+        handle_mem: torch.Tensor,
+        topk_idx: torch.Tensor,
+        tokens: torch.Tensor,
+        topk_weights: torch.Tensor,
+        recv_tokens: torch.Tensor,
+        recv_topk_weights: torch.Tensor,
+        tokens_scale_inv: Optional[torch.Tensor] = None,
+        recv_scale_inv: Optional[torch.Tensor] = None,
+    ) -> Any:
+        raise NotImplementedError
+
+    def ep_prepare_and_dispatch(
+        self,
+        handle_mem: torch.Tensor,
+        topk_idx: torch.Tensor,
+        tokens: torch.Tensor,
+        topk_weights: torch.Tensor,
+        tokens_per_expert: torch.Tensor,
+        total_recv_tokens: torch.Tensor,
+        top_k: int,
+        dispatch_output_per_expert_alignment: int,
+        recv_tokens: Optional[torch.Tensor] = None,
+        recv_topk_weights: Optional[torch.Tensor] = None,
+        recv_scale_inv: Optional[torch.Tensor] = None,
+        tokens_scale_inv: Optional[torch.Tensor] = None,
+    ) -> Any:
+        raise NotImplementedError
+
+    def ep_dispatch_bwd(
+        self,
+        handle_mem: torch.Tensor,
+        grad: torch.Tensor,
+        g_recv_topk_weights: torch.Tensor,
+        grad_tokens: torch.Tensor,
+        grad_topk_weights: torch.Tensor,
+    ) -> Any:
+        raise NotImplementedError
+
+    def ep_combine(
+        self,
+        handle_mem: torch.Tensor,
+        expert_out: torch.Tensor,
+        result: torch.Tensor,
+    ) -> Any:
+        raise NotImplementedError
+
+    def ep_combine_bwd(
+        self,
+        handle_mem: torch.Tensor,
+        grad: torch.Tensor,
+        grad_expert_out: torch.Tensor,
+        grad_scale_inv: Optional[torch.Tensor] = None,
+        grad_expert_out_scale_inv: Optional[torch.Tensor] = None,
+    ) -> Any:
+        raise NotImplementedError
+
+    def ep_get_zero_copy(self) -> bool:
+        raise NotImplementedError
+
+    def ep_zero_copy_supported(self) -> bool:
+        raise NotImplementedError
+
     ############## class func #################################
     def create_fp8_tensor_meta(self) -> FP8TensorMeta:
         """Create FP8TensorMeta instance."""
@@ -1773,7 +2324,9 @@ class TEFLBackendBase(ABC):
         buffer_dtype: torch.dtype,
         helper: Any,
         tp_size: int,
-        num_splits: int = 3,
+        use_cublasmp: bool = False,
+        comm_type: Any = None,
+        num_splits: int = 4,
         num_max_streams: int = 3,
         comm_cga_size: int = 2,
         gemm_priority: int = 0,
@@ -1805,6 +2358,7 @@ class TEFLBackendBase(ABC):
         atomic_gemm: bool = False,
         use_ce: bool = True,
         aggregate: bool = False,
+        use_cublasmp: bool = False,
     ) -> "CommOverlapP2P":
         """
         Internal method to create CommOverlapP2P.
@@ -1842,6 +2396,9 @@ class TEFLModule:
         self.NVTE_Fused_Attn_Backend = NVTE_Fused_Attn_Backend
         self.NVTE_QKV_Format = NVTE_QKV_Format
         self.NVTE_QKV_Layout = NVTE_QKV_Layout
+        self.NVTEScalingMode = NVTEScalingMode
+        self.NVTERoutingMapFormat = NVTERoutingMapFormat
+        self.NVTEQBHistogramMode = NVTEQBHistogramMode
         self.CommOverlapType = CommOverlapType
         self.CommOverlapAlgo = CommOverlapAlgo
         self.CommGemmOverlapRole = CommGemmOverlapRole
@@ -1889,6 +2446,9 @@ class TEFLModule:
             "NVTE_Fused_Attn_Backend",
             "NVTE_QKV_Format",
             "NVTE_QKV_Layout",
+            "NVTEScalingMode",
+            "NVTERoutingMapFormat",
+            "NVTEQBHistogramMode",
             "CommOverlapType",
             "CommOverlapAlgo",
             "CommGemmOverlapRole",

@@ -12,7 +12,9 @@ __all__ = [
     "layernorm_bwd_torch",
 ]
 
-# Mapping from DType enum to torch.dtype
+# Mapping from DType enum to torch.dtype. Only the members TE main actually
+# exposes through pybind are listed; kInt16/kInt64 exist in the C++ enum but are
+# not bound, so they can never reach this map.
 _DTYPE_TO_TORCH_DTYPE = {
     DType.kByte: torch.uint8,
     DType.kInt32: torch.int32,

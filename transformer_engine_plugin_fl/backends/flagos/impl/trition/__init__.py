@@ -2,6 +2,4 @@
 #
 # See LICENSE for license information.
 
-from .iluvatar import IluvatarBackend
-
-__all__ = ["IluvatarBackend"]
+from .fused_rope import *

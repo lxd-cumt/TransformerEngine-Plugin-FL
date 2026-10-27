@@ -46,6 +46,11 @@ def geglu_torch(input: torch.Tensor, quantizer: Any) -> torch.Tensor:
     return F.gelu(a, approximate="tanh") * b
 
 
+def glu_torch(input: torch.Tensor, quantizer: Any) -> torch.Tensor:
+    a, b = input.chunk(2, dim=-1)
+    return torch.sigmoid(a) * b
+
+
 def qgelu_torch(input: torch.Tensor, quantizer: Any) -> torch.Tensor:
     return input * torch.sigmoid(1.702 * input)
 
@@ -87,6 +92,7 @@ def clamped_swiglu_torch(
     quantizer: Any,
     limit: float = 7.0,
     alpha: float = 1.702,
+    glu_linear_offset: float = 1.0,
 ) -> torch.Tensor:
     """Clamped SwiGLU matching CUDA implementation.
 
@@ -99,7 +105,7 @@ def clamped_swiglu_torch(
     # CUDA only clamps a to upper bound
     a_clamped = torch.clamp(a, max=limit)
     # CUDA clamps b to [-limit, limit] and adds 1
-    b_clamped = torch.clamp(b, -limit, limit) + 1
+    b_clamped = torch.clamp(b, -limit, limit) + glu_linear_offset
     return a_clamped * torch.sigmoid(alpha * a_clamped) * b_clamped
 
 
@@ -118,6 +124,18 @@ def dgeglu_torch(grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) ->
 
     with torch.enable_grad():
         y = F.gelu(a, approximate="tanh") * b
+        y.backward(grad)
+
+    return torch.cat([a.grad, b.grad], dim=-1)
+
+
+def dglu_torch(grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> torch.Tensor:
+    a, b = fwd_input.chunk(2, dim=-1)
+    a = a.detach().requires_grad_(True)
+    b = b.detach().requires_grad_(True)
+
+    with torch.enable_grad():
+        y = torch.sigmoid(a) * b
         y.backward(grad)
 
     return torch.cat([a.grad, b.grad], dim=-1)
@@ -197,6 +215,7 @@ def clamped_dswiglu_torch(
     quantizer: Any,
     limit: float = 7.0,
     alpha: float = 1.702,
+    glu_linear_offset: float = 1.0,
 ) -> torch.Tensor:
     """Backward pass for clamped SwiGLU matching CUDA implementation.
 
@@ -209,7 +228,7 @@ def clamped_dswiglu_torch(
     # CUDA only clamps a to upper bound
     a_clamped = torch.clamp(a, max=limit)
     # CUDA clamps b to [-limit, limit] and adds 1
-    b_clamped = torch.clamp(b, -limit, limit) + 1
+    b_clamped = torch.clamp(b, -limit, limit) + glu_linear_offset
 
     a_clamped = a_clamped.detach().requires_grad_(True)
     b_clamped = b_clamped.detach().requires_grad_(True)

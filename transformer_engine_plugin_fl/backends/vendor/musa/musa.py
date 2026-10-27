@@ -109,8 +109,24 @@ class MUSABackend(TEFLBackendBase):
 
     def _get_tex(self):
         if self._tex is None:
-            self._tex = _get_tex()
+            self._tex = vendor_te_compat(_get_tex(), "MUSA")
         return self._tex
+
+    def _normalize_quantizer_dtype(self, quantizer: Any) -> Any:
+        """Re-wrap ``quantizer.dtype`` as this backend's pybind ``tex.DType``.
+
+        Quantizers built against the plugin's pure-Python ``DType`` carry an
+        IntEnum the pybind layer will not accept, so convert by integer value.
+        """
+        try:
+            tex = self._get_tex()
+            if quantizer is not None and hasattr(quantizer, "dtype") and hasattr(tex, "DType"):
+                qdtype = quantizer.dtype
+                if qdtype is not None:
+                    quantizer.dtype = tex.DType(int(qdtype))
+        except Exception:
+            pass
+        return quantizer
 
     def is_available(self) -> bool:
         return _check_musa_available()
@@ -130,7 +146,89 @@ class MUSABackend(TEFLBackendBase):
 
         return _original_get_attention_backend(attention_params)
 
-    ##### transformer_engine/pytorch/csrc/extensions/pybind.cpp #####
+    def get_flash_attention_class(self):
+        from .flash_attention import FlashAttentionMusa
+
+        return FlashAttentionMusa
+
+    def create_comm_overlap(
+        self,
+        buffer_shape: List[int],
+        buffer_dtype: torch.dtype,
+        helper: Any,
+        tp_size: int,
+        use_cublasmp: bool = False,
+        comm_type: Any = None,
+        num_splits: int = 4,
+        num_max_streams: int = 3,
+        comm_cga_size: int = 2,
+        gemm_priority: int = 0,
+        comm_priority: int = 0,
+        num_comm_sm: int = 16,
+        set_sm_margin: bool = True,
+        atomic_gemm: bool = False,
+        rs_overlap_first_gemm: bool = False,
+    ) -> "CommOverlap":
+        if use_cublasmp:
+            raise NotImplementedError("musa does not support cuBLASMp overlap")
+        # The vendor constructor has no comm_type argument; upstream only uses
+        # it on the cuBLASMp path, which is rejected above.
+        tex = self._get_tex()
+        return tex.CommOverlap(
+            buffer_shape,
+            buffer_dtype,
+            helper,
+            tp_size,
+            num_splits,
+            num_max_streams,
+            comm_cga_size,
+            gemm_priority,
+            comm_priority,
+            num_comm_sm,
+            set_sm_margin,
+            atomic_gemm,
+            rs_overlap_first_gemm,
+        )
+
+    def create_comm_overlap_p2p(
+        self,
+        buffer_shape: List[int],
+        buffer_dtype: torch.dtype,
+        helper: Any,
+        tp_size: int,
+        comm_type: Any,
+        num_max_streams: int = 3,
+        comm_cga_size: int = 1,
+        gemm_priority: int = 0,
+        comm_priority: int = 0,
+        num_comm_sm: int = 1,
+        set_sm_margin: bool = False,
+        atomic_gemm: bool = False,
+        use_ce: bool = True,
+        aggregate: bool = False,
+        use_cublasmp: bool = False,
+    ) -> "CommOverlapP2P":
+        if use_cublasmp:
+            raise NotImplementedError("musa does not support cuBLASMp overlap")
+        tex = self._get_tex()
+        return tex.CommOverlapP2P(
+            buffer_shape,
+            buffer_dtype,
+            helper,
+            tp_size,
+            comm_type,
+            num_max_streams,
+            comm_cga_size,
+            gemm_priority,
+            comm_priority,
+            num_comm_sm,
+            set_sm_margin,
+            atomic_gemm,
+            use_ce,
+            aggregate,
+        )
+
+    ##### BEGIN GENERATED OPS (tools/gen_vendor_ops.py) #####
     def quantize(
         self,
         tensor: torch.Tensor,
@@ -139,13 +237,7 @@ class MUSABackend(TEFLBackendBase):
         noop: Optional[torch.Tensor] = None,
     ) -> Any:
         tex = self._get_tex()
-        try:
-            if quantizer is not None and hasattr(quantizer, "dtype") and hasattr(tex, "DType"):
-                qdtype = quantizer.dtype
-                if qdtype is not None:
-                    quantizer.dtype = tex.DType(int(qdtype))
-        except Exception:
-            pass
+        self._normalize_quantizer_dtype(quantizer)
         return tex.quantize(tensor, quantizer, output, noop)
 
     def dequantize(
@@ -163,16 +255,7 @@ class MUSABackend(TEFLBackendBase):
         quantizer: Any,
     ) -> List[Any]:
         tex = self._get_tex()
-
-        # Normalize quantizer.dtype to this backend's `tex.DType`.
-        try:
-            if quantizer is not None and hasattr(quantizer, "dtype") and hasattr(tex, "DType"):
-                qdtype = quantizer.dtype
-                if qdtype is not None:
-                    quantizer.dtype = tex.DType(int(qdtype))
-        except Exception:
-            pass
-
+        self._normalize_quantizer_dtype(quantizer)
         return tex.bgrad_quantize(input, quantizer)
 
     def group_quantize(
@@ -181,16 +264,23 @@ class MUSABackend(TEFLBackendBase):
         quantizer: Any,
         num_tensors: int,
         first_dims: List[int],
+        last_dims: Optional[List[int]] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
+        noop_flag: Optional[torch.Tensor] = None,
+        output: Optional[Any] = None,
     ) -> Any:
         tex = self._get_tex()
-        try:
-            if quantizer is not None and hasattr(quantizer, "dtype") and hasattr(tex, "DType"):
-                qdtype = quantizer.dtype
-                if qdtype is not None:
-                    quantizer.dtype = tex.DType(int(qdtype))
-        except Exception:
-            pass
-        return tex.group_quantize(tensor, quantizer, num_tensors, first_dims)
+        self._normalize_quantizer_dtype(quantizer)
+        return tex.group_quantize(
+            tensor,
+            quantizer,
+            num_tensors,
+            first_dims,
+            last_dims,
+            tensor_offsets,
+            noop_flag,
+            output,
+        )
 
     def bgrad_group_quantize(
         self,
@@ -198,16 +288,114 @@ class MUSABackend(TEFLBackendBase):
         quantizer: Any,
         num_tensors: int,
         first_dims: List[int],
+        last_dims: Optional[List[int]] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
     ) -> Any:
         tex = self._get_tex()
-        try:
-            if quantizer is not None and hasattr(quantizer, "dtype") and hasattr(tex, "DType"):
-                qdtype = quantizer.dtype
-                if qdtype is not None:
-                    quantizer.dtype = tex.DType(int(qdtype))
-        except Exception:
-            pass
-        return tex.bgrad_group_quantize(tensor, quantizer, num_tensors, first_dims)
+        self._normalize_quantizer_dtype(quantizer)
+        return tex.bgrad_group_quantize(
+            tensor, quantizer, num_tensors, first_dims, last_dims, tensor_offsets
+        )
+
+    def group_dequantize(
+        self,
+        input: Any,
+        otype: DType,
+    ) -> Any:
+        tex = self._get_tex()
+        otype = tex.DType(int(otype)) if otype is not None else None
+        return tex.group_dequantize(input, otype)
+
+    def group_requantize_inplace(
+        self,
+        grouped_x: Any,
+        quantizer: Any,
+        num_tensors: int,
+        first_dims: List[int],
+        otype: DType,
+        tensor_offsets: Optional[torch.Tensor] = None,
+        return_dequantized: bool = False,
+    ) -> Any:
+        tex = self._get_tex()
+        self._normalize_quantizer_dtype(quantizer)
+        otype = tex.DType(int(otype)) if otype is not None else None
+        return tex.group_requantize_inplace(
+            grouped_x,
+            quantizer,
+            num_tensors,
+            first_dims,
+            otype,
+            tensor_offsets,
+            return_dequantized,
+        )
+
+    def create_empty_quantized_tensor(
+        self,
+        quantizer: Any,
+        shape: List[int],
+        dtype: torch.dtype,
+        device: Any,
+        pin_memory: bool,
+    ) -> Any:
+        tex = self._get_tex()
+        self._normalize_quantizer_dtype(quantizer)
+        return tex.create_empty_quantized_tensor(quantizer, shape, dtype, device, pin_memory)
+
+    def nvfp4_quantize_with_amax(
+        self,
+        tensor: torch.Tensor,
+        quantizer: Any,
+        rowwise_amax: Optional[torch.Tensor],
+        columnwise_amax: Optional[torch.Tensor],
+    ) -> Any:
+        tex = self._get_tex()
+        self._normalize_quantizer_dtype(quantizer)
+        return tex.nvfp4_quantize_with_amax(tensor, quantizer, rowwise_amax, columnwise_amax)
+
+    def nvfp4_group_quantize_with_amax(
+        self,
+        tensor: torch.Tensor,
+        quantizer: Any,
+        num_tensors: int,
+        first_dims: List[int],
+        last_dims: Optional[List[int]] = None,
+        rowwise_amax: Optional[torch.Tensor] = None,
+        columnwise_amax: Optional[torch.Tensor] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
+    ) -> Any:
+        tex = self._get_tex()
+        self._normalize_quantizer_dtype(quantizer)
+        return tex.nvfp4_group_quantize_with_amax(
+            tensor,
+            quantizer,
+            num_tensors,
+            first_dims,
+            last_dims,
+            rowwise_amax=rowwise_amax,
+            columnwise_amax=columnwise_amax,
+            tensor_offsets=tensor_offsets,
+        )
+
+    def nvfp4_gemm_swizzled_scales_alignment(
+        self,
+        optimize_for_gemm: bool,
+        with_rht: bool,
+        with_2d_quantization: bool,
+        row_scaled_nvfp4: bool,
+        nvfp4_use_4over6: bool,
+        sm_arch: int,
+        disable_rht_cast_fusion: bool,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.nvfp4_gemm_swizzled_scales_alignment(
+            optimize_for_gemm,
+            with_rht,
+            with_2d_quantization,
+            row_scaled_nvfp4,
+            nvfp4_use_4over6,
+            sm_arch,
+            disable_rht_cast_fusion,
+        )
 
     def generic_gemm(
         self,
@@ -264,12 +452,10 @@ class MUSABackend(TEFLBackendBase):
             beta,
         )
 
-    # GLU #
     def glu(self, input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.glu(input, quantizer)
 
-    # GELU and variants #
     def gelu(self, input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.gelu(input, quantizer)
@@ -286,7 +472,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.qgeglu(input, quantizer)
 
-    # ReLU and variants #
     def relu(self, input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.relu(input, quantizer)
@@ -303,7 +488,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.sreglu(input, quantizer)
 
-    # SwiGLU and variants #
     def silu(self, input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.silu(input, quantizer)
@@ -318,16 +502,25 @@ class MUSABackend(TEFLBackendBase):
         quantizer: Any,
         limit: float = 7.0,
         alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
     ) -> Any:
         tex = self._get_tex()
-        return tex.clamped_swiglu(input, quantizer, limit, alpha)
+        return tex.clamped_swiglu(input, quantizer, limit, alpha, glu_linear_offset)
 
-    # Backward of GLU #
+    def situglu(
+        self,
+        input: torch.Tensor,
+        quantizer: Any,
+        beta1: float = 4.0,
+        beta2: float = 25.0,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.situglu(input, quantizer, beta1, beta2)
+
     def dglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dglu(grad, fwd_input, quantizer)
 
-    # Backward of GELU and variants #
     def dgelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dgelu(grad, fwd_input, quantizer)
@@ -344,7 +537,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.dqgeglu(grad, fwd_input, quantizer)
 
-    # Backward of ReLU and variants #
     def drelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.drelu(grad, fwd_input, quantizer)
@@ -361,7 +553,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.dsreglu(grad, fwd_input, quantizer)
 
-    # Backward of SiLU and variants #
     def dsilu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         tex = self._get_tex()
         return tex.dsilu(grad, fwd_input, quantizer)
@@ -377,11 +568,22 @@ class MUSABackend(TEFLBackendBase):
         quantizer: Any,
         limit: float = 7.0,
         alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
     ) -> Any:
         tex = self._get_tex()
-        return tex.clamped_dswiglu(grad, fwd_input, quantizer, limit, alpha)
+        return tex.clamped_dswiglu(grad, fwd_input, quantizer, limit, alpha, glu_linear_offset)
 
-    # DBias + DAct fusions #
+    def dsituglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        quantizer: Any,
+        beta1: float = 4.0,
+        beta2: float = 25.0,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.dsituglu(grad, fwd_input, quantizer, beta1, beta2)
+
     def dbias_dgelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> List[Any]:
         tex = self._get_tex()
         return tex.dbias_dgelu(grad, fwd_input, quantizer)
@@ -406,7 +608,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.dbias_dsrelu(grad, fwd_input, quantizer)
 
-    # Permutation functions
     def moe_permute_fwd(
         self,
         input: torch.Tensor,
@@ -460,14 +661,13 @@ class MUSABackend(TEFLBackendBase):
         dtype = tex.DType(int(dtype)) if dtype is not None else None
         return tex.moe_unpermute_bwd(input_bwd, input_fwd, dtype, row_id_map, prob)
 
-    # Softmax functions
     def scaled_softmax_forward(
         self,
         input: torch.Tensor,
-        scale: float,
+        scale_factor: float,
     ) -> torch.Tensor:
         tex = self._get_tex()
-        return tex.scaled_softmax_forward(input, scale)
+        return tex.scaled_softmax_forward(input, scale_factor)
 
     def scaled_softmax_backward(
         self,
@@ -525,16 +725,15 @@ class MUSABackend(TEFLBackendBase):
 
     def scaled_aligned_causal_masked_softmax_backward(
         self,
-        output_grad_: torch.Tensor,
+        output_grads_: torch.Tensor,
         softmax_results_: torch.Tensor,
         scale_factor: float,
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.scaled_aligned_causal_masked_softmax_backward(
-            output_grad_, softmax_results_, scale_factor
+            output_grads_, softmax_results_, scale_factor
         )
 
-    # Other granular functions
     def layernorm_fwd(
         self,
         input: torch.Tensor,
@@ -550,7 +749,15 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         otype = tex.DType(int(otype)) if otype is not None else None
         return tex.layernorm_fwd(
-            input, weight, bias, eps, ln_out, quantizer, otype, sm_margin, zero_centered_gamma
+            input,
+            weight,
+            bias,
+            eps,
+            ln_out,
+            quantizer,
+            otype,
+            sm_margin,
+            zero_centered_gamma,
         )
 
     def layernorm_bwd(
@@ -641,7 +848,7 @@ class MUSABackend(TEFLBackendBase):
         pre_gelu_out: List[torch.Tensor],
         grad: bool,
         workspace: List[torch.Tensor],
-        workspaceSizes: int,
+        workspaceSize: int,
         accumulate: bool,
         use_split_accumulator: bool,
         math_sm_count: int,
@@ -663,7 +870,7 @@ class MUSABackend(TEFLBackendBase):
             pre_gelu_out,
             grad,
             workspace,
-            workspaceSizes,
+            workspaceSize,
             accumulate,
             use_split_accumulator,
             math_sm_count,
@@ -685,6 +892,7 @@ class MUSABackend(TEFLBackendBase):
         self,
         input: torch.Tensor,
         dtype: DType,
+        *,
         out: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         tex = self._get_tex()
@@ -694,14 +902,16 @@ class MUSABackend(TEFLBackendBase):
     def swap_first_dims(
         self,
         tensor: torch.Tensor,
-        out: Optional[torch.Tensor],
+        *,
+        out: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         tex = self._get_tex()
-        return tex.swap_first_dims(tensor, out)
+        return tex.swap_first_dims(tensor, out=out)
 
     def nvfp4_data_transpose(
         self,
         input: torch.Tensor,
+        *,
         out: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         tex = self._get_tex()
@@ -750,61 +960,24 @@ class MUSABackend(TEFLBackendBase):
 
     def get_fused_attn_backend(
         self,
-        is_training: bool,
-        q_dtype: DType,
-        kv_dtype: DType,
-        qkv_layout: NVTE_QKV_Layout,
-        bias_type: NVTE_Bias_Type,
-        attn_mask_type: NVTE_Mask_Type,
-        softmax_type: NVTE_Softmax_Type,
-        p_dropout: float,
-        num_attn_heads: int,
-        num_gqa_groups: int,
-        max_seqlen_q: int,
-        max_seqlen_kv: int,
-        head_dim_qk: int,
-        head_dim_v: int,
-        window_size_left: int,
-        window_size_right: int,
-        return_max_logit: bool,
-        cuda_graph: bool = False,
-        deterministic: bool = False,
-    ) -> NVTE_Fused_Attn_Backend:
+        fused_attn_params: Any,
+    ) -> Tuple[NVTE_Fused_Attn_Backend, str]:
         tex = self._get_tex()
 
-        q_dtype = tex.DType(int(q_dtype)) if q_dtype is not None else None
-        kv_dtype = tex.DType(int(kv_dtype)) if kv_dtype is not None else None
-        qkv_layout = tex.NVTE_QKV_Layout(int(qkv_layout)) if qkv_layout is not None else None
-        bias_type = tex.NVTE_Bias_Type(int(bias_type)) if bias_type is not None else None
-        attn_mask_type = (
-            tex.NVTE_Mask_Type(int(attn_mask_type)) if attn_mask_type is not None else None
-        )
-        softmax_type = (
-            tex.NVTE_Softmax_Type(int(softmax_type)) if softmax_type is not None else None
-        )
+        for attr, enum_name in self._FUSED_ATTN_PARAM_ENUMS.items():
+            value = getattr(fused_attn_params, attr, None)
+            if value is None:
+                continue
+            tex_enum = getattr(tex, enum_name, None)
+            if tex_enum is None:
+                continue
+            try:
+                setattr(fused_attn_params, attr, tex_enum(int(value)))
+            except Exception:
+                pass
 
-        result = tex.get_fused_attn_backend(
-            is_training,
-            q_dtype,
-            kv_dtype,
-            qkv_layout,
-            bias_type,
-            attn_mask_type,
-            softmax_type,
-            p_dropout,
-            num_attn_heads,
-            num_gqa_groups,
-            max_seqlen_q,
-            max_seqlen_kv,
-            head_dim_qk,
-            head_dim_v,
-            window_size_left,
-            window_size_right,
-            return_max_logit,
-            cuda_graph,
-            deterministic,
-        )
-        return NVTE_Fused_Attn_Backend(result)
+        backend, message = tex.get_fused_attn_backend(fused_attn_params)
+        return NVTE_Fused_Attn_Backend(int(backend)), message
 
     def compute_amax(
         self,
@@ -826,7 +999,12 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         fp8_dtype = tex.DType(int(fp8_dtype)) if fp8_dtype is not None else None
         return tex.fused_amax_and_scale_update_after_reduction(
-            amax_reduction_buffer, amax_histories, scales, amax_compute_algo, fp8_dtype, margin
+            amax_reduction_buffer,
+            amax_histories,
+            scales,
+            amax_compute_algo,
+            fp8_dtype,
+            margin,
         )
 
     def fp8_block_scaling_compute_partial_amax(
@@ -860,37 +1038,43 @@ class MUSABackend(TEFLBackendBase):
             inp, out, scale, h, w, start_offset, block_len, out_dtype
         )
 
-    # MXFP8 scaling
     def mxfp8_scaling_compute_partial_amax(
         self,
-        tensor: torch.Tensor,
-        amax: torch.Tensor,
-        h: int,
-        w: int,
+        input: torch.Tensor,
+        amax_rowwise: torch.Tensor,
+        amax_colwise: torch.Tensor,
+        rows: int,
+        cols: int,
         start_offset: int,
-        block_len: int,
     ) -> None:
         tex = self._get_tex()
-        return tex.mxfp8_scaling_compute_partial_amax(tensor, amax, h, w, start_offset, block_len)
+        return tex.mxfp8_scaling_compute_partial_amax(
+            input, amax_rowwise, amax_colwise, rows, cols, start_offset
+        )
 
     def mxfp8_scaling_partial_cast(
         self,
-        inp: torch.Tensor,
-        out: torch.Tensor,
-        scale: torch.Tensor,
-        h: int,
-        w: int,
+        input: torch.Tensor,
+        output_rowwise: torch.Tensor,
+        output_colwise: torch.Tensor,
+        scale_inv_rowwise: torch.Tensor,
+        scale_inv_colwise: torch.Tensor,
+        rows: int,
+        cols: int,
         start_offset: int,
-        block_len: int,
-        out_dtype: DType,
     ) -> None:
         tex = self._get_tex()
-        out_dtype = tex.DType(int(out_dtype)) if out_dtype is not None else None
         return tex.mxfp8_scaling_partial_cast(
-            inp, out, scale, h, w, start_offset, block_len, out_dtype
+            input,
+            output_rowwise,
+            output_colwise,
+            scale_inv_rowwise,
+            scale_inv_colwise,
+            rows,
+            cols,
+            start_offset,
         )
 
-    # NVFP4 2D
     def nvfp4_2d_compute_partial_amax(
         self,
         tensor: torch.Tensor,
@@ -926,23 +1110,74 @@ class MUSABackend(TEFLBackendBase):
 
     def nvfp4_compute_global_scale(
         self,
-        global_amaxes: torch.Tensor,
-        global_scale_tensor: torch.Tensor,
+        global_amax: torch.Tensor,
+        global_scale: torch.Tensor,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         tex = self._get_tex()
-        return tex.nvfp4_compute_global_scale(global_amaxes, global_scale_tensor)
+        return tex.nvfp4_compute_global_scale(
+            global_amax, global_scale, tex.DType(int(scale_dtype))
+        )
 
-    def nvfp4_compute_per_block_scale(self, *args, **kwargs):
+    def nvfp4_compute_per_block_scale(
+        self,
+        block_amax: torch.Tensor,
+        scale: torch.Tensor,
+        global_amax: torch.Tensor,
+        scale_dtype: DType = DType.kFloat8E4M3,
+    ) -> None:
         tex = self._get_tex()
-        return tex.nvfp4_compute_per_block_scale(*args, **kwargs)
+        return tex.nvfp4_compute_per_block_scale(
+            block_amax, scale, global_amax, tex.DType(int(scale_dtype))
+        )
 
-    def nvfp4_expand_scale_to_fp8(self, *args, **kwargs):
+    def nvfp4_expand_scale_to_fp8(
+        self,
+        input: torch.Tensor,
+        output: torch.Tensor,
+        tile_rows: int,
+        tile_cols: int,
+        rows_padded: int,
+        block_len: int,
+        scale_dtype: DType = DType.kFloat8E4M3,
+    ) -> None:
         tex = self._get_tex()
-        return tex.nvfp4_expand_scale_to_fp8(*args, **kwargs)
+        return tex.nvfp4_expand_scale_to_fp8(
+            input,
+            output,
+            tile_rows,
+            tile_cols,
+            rows_padded,
+            block_len,
+            tex.DType(int(scale_dtype)),
+        )
 
-    def nvfp4_fused_scale(self, *args, **kwargs):
+    def nvfp4_fused_scale(
+        self,
+        block_amax: torch.Tensor,
+        global_amax: torch.Tensor,
+        per_block_scale: torch.Tensor,
+        target_scale: torch.Tensor,
+        target_amax: torch.Tensor,
+        tile_rows: int,
+        tile_cols: int,
+        rows_padded: int,
+        block_len: int,
+        scale_dtype: DType = DType.kFloat8E4M3,
+    ) -> None:
         tex = self._get_tex()
-        return tex.nvfp4_fused_scale(*args, **kwargs)
+        return tex.nvfp4_fused_scale(
+            block_amax,
+            global_amax,
+            per_block_scale,
+            target_scale,
+            target_amax,
+            tile_rows,
+            tile_cols,
+            rows_padded,
+            block_len,
+            tex.DType(int(scale_dtype)),
+        )
 
     def nvfp4_multi_tensor_fused_scale(
         self,
@@ -955,6 +1190,7 @@ class MUSABackend(TEFLBackendBase):
         tile_cols_list: List[int],
         rows_padded_list: List[int],
         block_len: int,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         tex = self._get_tex()
         return tex.nvfp4_multi_tensor_fused_scale(
@@ -967,6 +1203,7 @@ class MUSABackend(TEFLBackendBase):
             tile_cols_list,
             rows_padded_list,
             block_len,
+            tex.DType(int(scale_dtype)),
         )
 
     def nvfp4_2d_partial_cast(
@@ -979,15 +1216,55 @@ class MUSABackend(TEFLBackendBase):
         w: int,
         start_offset: int,
         block_len: int = 16,
+        scale_dtype: DType = DType.kFloat8E4M3,
     ) -> None:
         tex = self._get_tex()
         return tex.nvfp4_2d_partial_cast(
-            inp, out, scale, global_scale, h, w, start_offset, block_len
+            inp,
+            out,
+            scale,
+            global_scale,
+            h,
+            w,
+            start_offset,
+            block_len,
+            tex.DType(int(scale_dtype)),
         )
 
-    def nvfp4_multi_tensor_2d_partial_cast(self, *args, **kwargs):
+    def nvfp4_multi_tensor_2d_partial_cast(
+        self,
+        inp_list: List[torch.Tensor],
+        out_list: List[torch.Tensor],
+        scale_list: List[torch.Tensor],
+        global_scale_list: List[torch.Tensor],
+        h_list: List[int],
+        w_list: List[int],
+        start_offset_list: List[int],
+        block_len: int = 16,
+        scale_dtype: DType = DType.kFloat8E4M3,
+    ) -> None:
         tex = self._get_tex()
-        return tex.nvfp4_multi_tensor_2d_partial_cast(*args, **kwargs)
+        return tex.nvfp4_multi_tensor_2d_partial_cast(
+            inp_list,
+            out_list,
+            scale_list,
+            global_scale_list,
+            h_list,
+            w_list,
+            start_offset_list,
+            block_len,
+            tex.DType(int(scale_dtype)),
+        )
+
+    def nvfp4_2d_scale_transpose(
+        self,
+        input: torch.Tensor,
+        output: torch.Tensor,
+        M_tiles: int,
+        K_tiles: int,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.nvfp4_2d_scale_transpose(input, output, M_tiles, K_tiles)
 
     def nvfp4_2d_multi_tensor_transpose(
         self,
@@ -1028,7 +1305,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.fused_multi_row_unpadding(input, output, input_row_list, unpadded_input_row_list)
 
-    # attention kernels
     def fa_prepare_fwd(
         self,
         qkvi: torch.Tensor,
@@ -1054,11 +1330,13 @@ class MUSABackend(TEFLBackendBase):
         p_dropout: float,
         set_zero: bool,
         qkv_layout: NVTE_QKV_Layout,
+        o_format: NVTE_QKV_Format,
+        qkv_scale_inv_format: NVTE_QKV_Format,
         bias_type: NVTE_Bias_Type,
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
         window_size: List[int],
-        bottom_right_diagonal: Optional[bool],
+        bottom_right_diagonal: bool,
         cu_seqlens_q: torch.Tensor,
         cu_seqlens_kv: torch.Tensor,
         Q: Any,
@@ -1088,6 +1366,12 @@ class MUSABackend(TEFLBackendBase):
         softmax_type = (
             tex.NVTE_Softmax_Type(int(softmax_type)) if softmax_type is not None else None
         )
+        o_format = tex.NVTE_QKV_Format(int(o_format)) if o_format is not None else None
+        qkv_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(qkv_scale_inv_format))
+            if qkv_scale_inv_format is not None
+            else None
+        )
 
         return tex.fused_attn_fwd(
             max_seqlen_q,
@@ -1097,6 +1381,8 @@ class MUSABackend(TEFLBackendBase):
             p_dropout,
             set_zero,
             qkv_layout,
+            o_format,
+            qkv_scale_inv_format,
             bias_type,
             attn_mask_type,
             softmax_type,
@@ -1130,11 +1416,16 @@ class MUSABackend(TEFLBackendBase):
         p_dropout: float,
         set_zero: bool,
         qkv_layout: NVTE_QKV_Layout,
+        o_format: NVTE_QKV_Format,
+        do_format: NVTE_QKV_Format,
+        dqkv_layout: NVTE_QKV_Layout,
+        qkv_scale_inv_format: NVTE_QKV_Format,
+        do_scale_inv_format: NVTE_QKV_Format,
         bias_type: NVTE_Bias_Type,
         attn_mask_type: NVTE_Mask_Type,
         softmax_type: NVTE_Softmax_Type,
         window_size: List[int],
-        bottom_right_diagonal: Optional[bool],
+        bottom_right_diagonal: bool,
         deterministic: bool,
         cu_seqlens_q: torch.Tensor,
         cu_seqlens_kv: torch.Tensor,
@@ -1144,7 +1435,6 @@ class MUSABackend(TEFLBackendBase):
         O: Any,
         dO: Any,
         fake_dtype: torch.dtype,
-        dqkv_type: DType,
         Aux_CTX_Tensors: List[torch.Tensor],
         cu_seqlens_q_padded: Optional[torch.Tensor],
         cu_seqlens_kv_padded: Optional[torch.Tensor],
@@ -1163,7 +1453,21 @@ class MUSABackend(TEFLBackendBase):
         softmax_type = (
             tex.NVTE_Softmax_Type(int(softmax_type)) if softmax_type is not None else None
         )
-        dqkv_type = tex.DType(int(dqkv_type)) if dqkv_type is not None else None
+        dqkv_layout = (
+            tex.NVTE_QKV_Layout(int(dqkv_layout)) if dqkv_layout is not None else None
+        )
+        o_format = tex.NVTE_QKV_Format(int(o_format)) if o_format is not None else None
+        do_format = tex.NVTE_QKV_Format(int(do_format)) if do_format is not None else None
+        qkv_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(qkv_scale_inv_format))
+            if qkv_scale_inv_format is not None
+            else None
+        )
+        do_scale_inv_format = (
+            tex.NVTE_QKV_Format(int(do_scale_inv_format))
+            if do_scale_inv_format is not None
+            else None
+        )
 
         return tex.fused_attn_bwd(
             max_seqlen_q,
@@ -1172,6 +1476,11 @@ class MUSABackend(TEFLBackendBase):
             p_dropout,
             set_zero,
             qkv_layout,
+            o_format,
+            do_format,
+            dqkv_layout,
+            qkv_scale_inv_format,
+            do_scale_inv_format,
             bias_type,
             attn_mask_type,
             softmax_type,
@@ -1186,7 +1495,6 @@ class MUSABackend(TEFLBackendBase):
             O,
             dO,
             fake_dtype,
-            dqkv_type,
             Aux_CTX_Tensors,
             cu_seqlens_q_padded,
             cu_seqlens_kv_padded,
@@ -1205,7 +1513,7 @@ class MUSABackend(TEFLBackendBase):
         page_table: torch.Tensor,
         cu_new_lens: torch.Tensor,
         cu_cached_lens: torch.Tensor,
-        qkv_format: NVTE_QKV_Format,
+        kv_format: NVTE_QKV_Format,
         b: int,
         max_ctx_len: int,
         max_seq_len: int,
@@ -1213,7 +1521,7 @@ class MUSABackend(TEFLBackendBase):
         is_non_paged: bool,
     ) -> None:
         tex = self._get_tex()
-        qkv_format = tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
+        kv_format = tex.NVTE_QKV_Format(int(kv_format)) if kv_format is not None else None
         return tex.copy_to_kv_cache(
             new_k,
             new_v,
@@ -1222,7 +1530,7 @@ class MUSABackend(TEFLBackendBase):
             page_table,
             cu_new_lens,
             cu_cached_lens,
-            qkv_format,
+            kv_format,
             b,
             max_ctx_len,
             max_seq_len,
@@ -1249,7 +1557,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.convert_bshd_to_thd(tensor, cu_seqlens, t)
 
-    # fused apply rope
     def fused_rope_forward(
         self,
         input: torch.Tensor,
@@ -1264,7 +1571,14 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         qkv_format = tex.NVTE_QKV_Format(int(qkv_format)) if qkv_format is not None else None
         return tex.fused_rope_forward(
-            input, freqs, start_positions, qkv_format, interleaved, cu_seqlens, cp_size, cp_rank
+            input,
+            freqs,
+            start_positions,
+            qkv_format,
+            interleaved,
+            cu_seqlens,
+            cp_size,
+            cp_rank,
         )
 
     def fused_rope_backward(
@@ -1345,7 +1659,6 @@ class MUSABackend(TEFLBackendBase):
             cp_rank,
         )
 
-    # fused router
     def fused_topk_with_score_function_fwd(
         self,
         logits: torch.Tensor,
@@ -1356,6 +1669,8 @@ class MUSABackend(TEFLBackendBase):
         scaling_factor: Optional[float],
         score_function: str,
         expert_bias: Optional[torch.Tensor],
+        routing_map_format: int = NVTERoutingMapFormat.BYTEMAP,
+        topk_indices: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tex = self._get_tex()
         return tex.fused_topk_with_score_function_fwd(
@@ -1367,12 +1682,39 @@ class MUSABackend(TEFLBackendBase):
             scaling_factor,
             score_function,
             expert_bias,
+            int(routing_map_format),
+            topk_indices,
+        )
+
+    def fused_topk_with_score_function_qb_fwd(
+        self,
+        logits: torch.Tensor,
+        topk: int,
+        scaling_factor: Optional[float],
+        expert_bias: Optional[torch.Tensor],
+        routing_map_format: int,
+        topk_indices: Optional[torch.Tensor],
+        histogram: Optional[torch.Tensor],
+        bin_bounds: Optional[torch.Tensor],
+        histogram_mode: int,
+        bin_bounds_validated: bool = False,
+    ) -> Tuple[torch.Tensor, ...]:
+        tex = self._get_tex()
+        return tex.fused_topk_with_score_function_qb_fwd(
+            logits,
+            topk,
+            scaling_factor,
+            expert_bias,
+            int(routing_map_format),
+            topk_indices,
+            histogram,
+            bin_bounds,
+            int(histogram_mode),
+            bin_bounds_validated,
         )
 
     def fused_topk_with_score_function_bwd(
         self,
-        num_tokens: int,
-        num_experts: int,
         routing_map: torch.Tensor,
         intermediate_output: torch.Tensor,
         grad_probs: torch.Tensor,
@@ -1381,11 +1723,11 @@ class MUSABackend(TEFLBackendBase):
         use_pre_softmax: bool,
         scaling_factor: Optional[float],
         score_function: str,
+        use_dense_indices: bool = False,
+        routing_map_format: int = NVTERoutingMapFormat.BYTEMAP,
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.fused_topk_with_score_function_bwd(
-            num_tokens,
-            num_experts,
             routing_map,
             intermediate_output,
             grad_probs,
@@ -1394,6 +1736,8 @@ class MUSABackend(TEFLBackendBase):
             use_pre_softmax,
             scaling_factor,
             score_function,
+            use_dense_indices,
+            int(routing_map_format),
         )
 
     def fused_score_for_moe_aux_loss_fwd(
@@ -1401,18 +1745,18 @@ class MUSABackend(TEFLBackendBase):
         logits: torch.Tensor,
         topk: int,
         score_function: str,
+        routing_map_format: int = NVTERoutingMapFormat.BYTEMAP,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tex = self._get_tex()
         return tex.fused_score_for_moe_aux_loss_fwd(
             logits,
             topk,
             score_function,
+            int(routing_map_format),
         )
 
     def fused_score_for_moe_aux_loss_bwd(
         self,
-        num_tokens: int,
-        num_experts: int,
         intermediate_output: torch.Tensor,
         grad_scores: torch.Tensor,
         grad_logits: torch.Tensor,
@@ -1421,8 +1765,6 @@ class MUSABackend(TEFLBackendBase):
     ) -> torch.Tensor:
         tex = self._get_tex()
         return tex.fused_score_for_moe_aux_loss_bwd(
-            num_tokens,
-            num_experts,
             intermediate_output,
             grad_scores,
             grad_logits,
@@ -1466,7 +1808,6 @@ class MUSABackend(TEFLBackendBase):
             Const_buf, tokens_per_expert, num_rows, num_cols, grad_aux_loss
         )
 
-    # Dropout
     def dropout_fwd(
         self,
         input: torch.Tensor,
@@ -1486,7 +1827,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.dropout_bwd(grad_output, mask, dropout_probability, grad_input)
 
-    # Misc
     def get_cublasLt_version(self) -> int:
         tex = self._get_tex()
         return tex.get_cublasLt_version()
@@ -1499,7 +1839,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.get_num_cublas_streams()
 
-    # Support THD format for Context Parallel
     def thd_read_half_tensor(
         self,
         tensor: torch.Tensor,
@@ -1533,6 +1872,7 @@ class MUSABackend(TEFLBackendBase):
         self,
         out: torch.Tensor,
         out_per_step: torch.Tensor,
+        old_lse: torch.Tensor,
         lse: torch.Tensor,
         lse_per_step: torch.Tensor,
         cu_seqlens: torch.Tensor,
@@ -1541,7 +1881,14 @@ class MUSABackend(TEFLBackendBase):
     ) -> None:
         tex = self._get_tex()
         return tex.thd_out_correction(
-            out, out_per_step, lse, lse_per_step, cu_seqlens, only_second_half, lse_packed
+            out,
+            out_per_step,
+            old_lse,
+            lse,
+            lse_per_step,
+            cu_seqlens,
+            only_second_half,
+            lse_packed,
         )
 
     def thd_grad_correction(
@@ -1565,7 +1912,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.thd_get_partitioned_indices(cu_seqlens, total_tokens, world_size, rank)
 
-    # nvshmem functions
     def init_nvshmem_backend(
         self,
         process_group: Any,
@@ -1603,7 +1949,6 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.nvshmem_finalize()
 
-    # multi-tensor functions
     def multi_tensor_scale(
         self,
         chunk_size: int,
@@ -1854,7 +2199,6 @@ class MUSABackend(TEFLBackendBase):
             chunk_size, noop_flag, tensor_lists, block_len
         )
 
-    # Comm+GEMM Overlap
     def bulk_overlap_ag_with_external_gemm(
         self,
         allgather_communicator: CommOverlap,
@@ -1865,12 +2209,6 @@ class MUSABackend(TEFLBackendBase):
         return tex.bulk_overlap_ag_with_external_gemm(
             allgather_communicator, send_stream, recv_stream
         )
-
-    ############## class func #################################
-    def get_flash_attention_class(self):
-        from .flash_attention import FlashAttentionMusa
-
-        return FlashAttentionMusa
 
     def create_fp8_tensor_meta(self) -> FP8TensorMeta:
         tex = self._get_tex()
@@ -1884,70 +2222,518 @@ class MUSABackend(TEFLBackendBase):
         tex = self._get_tex()
         return tex.CommOverlapHelper(world_group, intra_node_group)
 
-    def create_comm_overlap(
+    def bulk_allocate(
         self,
-        buffer_shape: List[int],
-        buffer_dtype: torch.dtype,
-        helper: Any,
-        tp_size: int,
-        num_splits: int = 3,
-        num_max_streams: int = 3,
-        comm_cga_size: int = 2,
-        gemm_priority: int = 0,
-        comm_priority: int = 0,
-        num_comm_sm: int = 16,
-        set_sm_margin: bool = True,
-        atomic_gemm: bool = False,
-        rs_overlap_first_gemm: bool = False,
-    ) -> "CommOverlap":
+        shapes: List[List[int]],
+        dtypes: List[torch.dtype],
+        device: Optional[torch.device] = None,
+        alignments: Optional[List[int]] = None,
+    ) -> List[torch.Tensor]:
         tex = self._get_tex()
-        return tex.CommOverlap(
-            buffer_shape,
-            buffer_dtype,
-            helper,
-            tp_size,
-            num_splits,
-            num_max_streams,
-            comm_cga_size,
-            gemm_priority,
-            comm_priority,
-            num_comm_sm,
-            set_sm_margin,
-            atomic_gemm,
-            rs_overlap_first_gemm,
+        return tex.bulk_allocate(shapes, dtypes, device, alignments)
+
+    def copy_data_ptrs_to_device(
+        self,
+        tensors: List[torch.Tensor],
+        device: torch.device,
+    ) -> torch.Tensor:
+        tex = self._get_tex()
+        return tex.copy_data_ptrs_to_device(tensors, device)
+
+    def cusolvermp_ctx_create(
+        self,
+        nccl_comm_ptr: int,
+        nranks: int,
+        rank: int,
+    ) -> int:
+        tex = self._get_tex()
+        return tex.cusolvermp_ctx_create(nccl_comm_ptr, nranks, rank)
+
+    def cusolvermp_ctx_destroy(self, ctx_ptr: int) -> None:
+        tex = self._get_tex()
+        return tex.cusolvermp_ctx_destroy(ctx_ptr)
+
+    def device_supports_multicast(self, device_id: int = -1) -> bool:
+        tex = self._get_tex()
+        return tex.device_supports_multicast(device_id)
+
+    def fused_moe_aux_loss_fwd_graph_safe(
+        self,
+        probs: torch.Tensor,
+        tokens_per_expert: torch.Tensor,
+        total_num_tokens: torch.Tensor,
+        num_experts: int,
+        num_rows: int,
+        num_cols: int,
+        topk: int,
+        coeff: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        tex = self._get_tex()
+        return tex.fused_moe_aux_loss_fwd_graph_safe(
+            probs, tokens_per_expert, total_num_tokens,
+            num_experts, num_rows, num_cols, topk, coeff,
         )
 
-    def create_comm_overlap_p2p(
-        self,
-        buffer_shape: List[int],
-        buffer_dtype: torch.dtype,
-        helper: Any,
-        tp_size: int,
-        comm_type: Any,
-        num_max_streams: int = 3,
-        comm_cga_size: int = 1,
-        gemm_priority: int = 0,
-        comm_priority: int = 0,
-        num_comm_sm: int = 1,
-        set_sm_margin: bool = False,
-        atomic_gemm: bool = False,
-        use_ce: bool = True,
-        aggregate: bool = False,
-    ) -> "CommOverlapP2P":
+    def get_grouped_gemm_setup_workspace_size(self, num_tensors: int) -> int:
         tex = self._get_tex()
-        return tex.CommOverlapP2P(
-            buffer_shape,
-            buffer_dtype,
-            helper,
-            tp_size,
-            comm_type,
-            num_max_streams,
-            comm_cga_size,
-            gemm_priority,
-            comm_priority,
-            num_comm_sm,
-            set_sm_margin,
-            atomic_gemm,
-            use_ce,
-            aggregate,
+        return tex.get_grouped_gemm_setup_workspace_size(num_tensors)
+
+    def get_stream_priority_range(self, device_id: int = -1) -> Tuple[int, int]:
+        tex = self._get_tex()
+        return tex.get_stream_priority_range(device_id)
+
+    def multi_tensor_pad_last_dim(
+        self,
+        inputs: List[torch.Tensor],
+        alignment: int,
+    ) -> List[torch.Tensor]:
+        tex = self._get_tex()
+        return tex.multi_tensor_pad_last_dim(inputs, alignment)
+
+    def multi_tensor_swizzle_scales_for_gemm_(
+        self,
+        tensors: List[Any],
+        rowwise_usage: bool,
+        columnwise_usage: bool,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.multi_tensor_swizzle_scales_for_gemm_(tensors, rowwise_usage, columnwise_usage)
+
+    def multi_tensor_swizzle_scales_for_gemm_unchecked_(
+        self,
+        tensors: List[Any],
+        rowwise_usage: bool,
+        columnwise_usage: bool,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.multi_tensor_swizzle_scales_for_gemm_unchecked_(tensors, rowwise_usage, columnwise_usage)
+
+    def multi_tensor_transpose_to_bhsd(
+        self,
+        inputs: List[Optional[torch.Tensor]],
+        original_format: str,
+        outputs: Optional[List[Optional[torch.Tensor]]] = None,
+    ) -> List[Optional[torch.Tensor]]:
+        tex = self._get_tex()
+        if outputs is None:
+            outputs = []
+        return tex.multi_tensor_transpose_to_bhsd(inputs, original_format, outputs)
+
+    def newton_schulz(
+        self,
+        ctx_ptr: int,
+        m: int,
+        n: int,
+        x: torch.Tensor,
+        num_iterations: int,
+        coefficients: List[float],
+    ) -> None:
+        tex = self._get_tex()
+        return tex.newton_schulz(ctx_ptr, m, n, x, num_iterations, coefficients)
+
+    def nvte_built_with_cublasmp(self) -> bool:
+        tex = self._get_tex()
+        return tex.nvte_built_with_cublasmp()
+
+    def scaled_swiglu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        glu_interleave_size: int = 0,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.scaled_swiglu(input, act_scales, quantizer, glu_interleave_size)
+
+    def scaled_dswiglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        glu_interleave_size: int = 0,
+        compute_scale_grad: bool = True,
+    ) -> Tuple:
+        tex = self._get_tex()
+        return tex.scaled_dswiglu(
+            grad, fwd_input, act_scales, quantizer, glu_interleave_size, compute_scale_grad,
         )
+
+    def scaled_srelu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.scaled_srelu(input, act_scales, quantizer)
+
+    def scaled_dsrelu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        compute_scale_grad: bool = True,
+    ) -> Tuple:
+        tex = self._get_tex()
+        return tex.scaled_dsrelu(grad, fwd_input, act_scales, quantizer, compute_scale_grad)
+
+    def scaled_clamped_swiglu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        limit: float = 7.0,
+        alpha: float = 1.7020000219345093,
+        glu_linear_offset: float = 1.0,
+        glu_interleave_size: int = 0,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.scaled_clamped_swiglu(
+            input, act_scales, quantizer, limit, alpha, glu_linear_offset, glu_interleave_size,
+        )
+
+    def scaled_clamped_dswiglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        limit: float = 7.0,
+        alpha: float = 1.7020000219345093,
+        glu_linear_offset: float = 1.0,
+        glu_interleave_size: int = 0,
+        compute_scale_grad: bool = True,
+    ) -> Tuple:
+        tex = self._get_tex()
+        return tex.scaled_clamped_dswiglu(
+            grad, fwd_input, act_scales, quantizer,
+            limit, alpha, glu_linear_offset, glu_interleave_size, compute_scale_grad,
+        )
+
+    def splits_to_offsets_multi(
+        self,
+        split_sizes: torch.Tensor,
+        device: torch.device,
+        *,
+        strides: List[int],
+        include_leading_zero: List[bool],
+        dtypes: List[torch.dtype],
+        bulk_allocate: bool = False,
+    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        tex = self._get_tex()
+        return tex.splits_to_offsets_multi(
+            split_sizes, device,
+            strides=strides,
+            include_leading_zero=include_leading_zero,
+            dtypes=dtypes,
+            bulk_allocate=bulk_allocate,
+        )
+
+    def thd_copy_valid_tokens_from_per_split_to_rank_local(
+        self,
+        out: torch.Tensor,
+        inp: torch.Tensor,
+        cu_seqlens_padded: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+    ) -> None:
+        tex = self._get_tex()
+        return tex.thd_copy_valid_tokens_from_per_split_to_rank_local(
+            out, inp, cu_seqlens_padded, cu_seqlens,
+        )
+
+    def thd_cp_rank_order_to_sequence_order(
+        self,
+        inp: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        cp_size: int,
+        total_tokens: int,
+    ) -> torch.Tensor:
+        tex = self._get_tex()
+        return tex.thd_cp_rank_order_to_sequence_order(inp, cu_seqlens, cp_size, total_tokens)
+
+    def thd_sequence_order_to_cp_rank_order(
+        self,
+        inp: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        cp_size: int,
+        total_tokens: int,
+    ) -> torch.Tensor:
+        tex = self._get_tex()
+        return tex.thd_sequence_order_to_cp_rank_order(inp, cu_seqlens, cp_size, total_tokens)
+
+    def ubuf_built_with_mpi(self) -> bool:
+        tex = self._get_tex()
+        return tex.ubuf_built_with_mpi()
+
+    def swizzle_scales_and_pack_ptrs_for_discrete_weights(
+        self,
+        data_tensors: List[torch.Tensor],
+        scale_tensors: List[torch.Tensor],
+        swizzle_type: str,
+        device: torch.device,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        tex = self._get_tex()
+        return tex.grouped_mlp_experimental.swizzle_scales_and_pack_ptrs_for_discrete_weights(
+            data_tensors, scale_tensors, swizzle_type, device,
+        )
+
+    def scaled_situglu(
+        self,
+        input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        beta1: float = 4.0,
+        beta2: float = 25.0,
+        glu_interleave_size: int = 0,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.scaled_situglu(
+            input, act_scales, quantizer, beta1, beta2, glu_interleave_size
+        )
+
+    def scaled_dsituglu(
+        self,
+        grad: torch.Tensor,
+        fwd_input: torch.Tensor,
+        act_scales: torch.Tensor,
+        quantizer: Any,
+        beta1: float = 4.0,
+        beta2: float = 25.0,
+        glu_interleave_size: int = 0,
+        compute_scale_grad: bool = True,
+    ) -> Any:
+        tex = self._get_tex()
+        return tex.scaled_dsituglu(
+            grad,
+            fwd_input,
+            act_scales,
+            quantizer,
+            beta1,
+            beta2,
+            glu_interleave_size,
+            compute_scale_grad,
+        )
+
+    def group_scaled_swiglu(
+        self,
+        input_2h: torch.Tensor,
+        prob: torch.Tensor,
+        quantizer: Any,
+        num_tensors: int,
+        first_dims: Optional[List[int]] = None,
+        last_dims: Optional[List[int]] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
+    ) -> Any:
+        tex = self._get_tex()
+        self._normalize_quantizer_dtype(quantizer)
+        return tex.group_scaled_swiglu(
+            input_2h, prob, quantizer, num_tensors, first_dims, last_dims, tensor_offsets
+        )
+
+    def group_scaled_clamped_swiglu(
+        self,
+        input_2h: torch.Tensor,
+        prob: torch.Tensor,
+        quantizer: Any,
+        num_tensors: int,
+        limit: float,
+        alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
+        first_dims: Optional[List[int]] = None,
+        last_dims: Optional[List[int]] = None,
+        tensor_offsets: Optional[torch.Tensor] = None,
+    ) -> Any:
+        tex = self._get_tex()
+        self._normalize_quantizer_dtype(quantizer)
+        return tex.group_scaled_clamped_swiglu(
+            input_2h,
+            prob,
+            quantizer,
+            num_tensors,
+            limit,
+            alpha,
+            glu_linear_offset,
+            first_dims,
+            last_dims,
+            tensor_offsets,
+        )
+
+    def fused_mla_kv_rope_mxfp8(
+        self,
+        kv: torch.Tensor,
+        k_rope: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        v_head_dim: int,
+        key_quantizer: Any,
+        value_quantizer: Any,
+    ) -> List[Any]:
+        tex = self._get_tex()
+        self._normalize_quantizer_dtype(key_quantizer)
+        self._normalize_quantizer_dtype(value_quantizer)
+        return tex.fused_mla_kv_rope_mxfp8(
+            kv, k_rope, cos, sin, v_head_dim, key_quantizer, value_quantizer
+        )
+
+    def get_cublasLt_build_version(self) -> int:
+        tex = self._get_tex()
+        return tex.get_cublasLt_build_version()
+
+    def nvte_cublasmp_version(self) -> int:
+        tex = self._get_tex()
+        return tex.nvte_cublasmp_version()
+
+    def get_nccl_comm_ptr(self, process_group: Any) -> int:
+        tex = self._get_tex()
+        return tex.get_nccl_comm_ptr(process_group)
+
+    def ep_initialize(
+        self,
+        comm_ptr: int,
+        group_name: str,
+        num_experts: int,
+        max_tokens_per_rank: int,
+        max_recv_tokens_per_rank: int,
+        hidden_dim: int,
+        max_num_sms: int = 0,
+        max_token_dtype: Any = None,
+        zero_copy: bool = False,
+        num_topk: int = 0,
+        drop_on_overflow: bool = False,
+    ) -> None:
+        return self._tex_fn("ep_initialize")(
+            comm_ptr,
+            group_name,
+            num_experts,
+            max_tokens_per_rank,
+            max_recv_tokens_per_rank,
+            hidden_dim,
+            max_num_sms,
+            max_token_dtype,
+            zero_copy,
+            num_topk,
+            drop_on_overflow,
+        )
+
+    def ep_finalize(self) -> None:
+        return self._tex_fn("ep_finalize")()
+
+    def ep_handle_mem_size(
+        self,
+        top_k: int,
+        dispatch_output_per_expert_alignment: int = 0,
+    ) -> int:
+        return self._tex_fn("ep_handle_mem_size")(
+            top_k, dispatch_output_per_expert_alignment
+        )
+
+    def ep_prepare(
+        self,
+        handle_mem: torch.Tensor,
+        topk_idx: torch.Tensor,
+        tokens_per_expert: torch.Tensor,
+        top_k: int,
+        dispatch_output_per_expert_alignment: int,
+        total_recv_tokens: torch.Tensor,
+    ) -> Any:
+        return self._tex_fn("ep_prepare")(
+            handle_mem,
+            topk_idx,
+            tokens_per_expert,
+            top_k,
+            dispatch_output_per_expert_alignment,
+            total_recv_tokens,
+        )
+
+    def ep_dispatch(
+        self,
+        handle_mem: torch.Tensor,
+        topk_idx: torch.Tensor,
+        tokens: torch.Tensor,
+        topk_weights: torch.Tensor,
+        recv_tokens: torch.Tensor,
+        recv_topk_weights: torch.Tensor,
+        tokens_scale_inv: Optional[torch.Tensor] = None,
+        recv_scale_inv: Optional[torch.Tensor] = None,
+    ) -> Any:
+        return self._tex_fn("ep_dispatch")(
+            handle_mem,
+            topk_idx,
+            tokens,
+            topk_weights,
+            recv_tokens,
+            recv_topk_weights,
+            tokens_scale_inv,
+            recv_scale_inv,
+        )
+
+    def ep_prepare_and_dispatch(
+        self,
+        handle_mem: torch.Tensor,
+        topk_idx: torch.Tensor,
+        tokens: torch.Tensor,
+        topk_weights: torch.Tensor,
+        tokens_per_expert: torch.Tensor,
+        total_recv_tokens: torch.Tensor,
+        top_k: int,
+        dispatch_output_per_expert_alignment: int,
+        recv_tokens: Optional[torch.Tensor] = None,
+        recv_topk_weights: Optional[torch.Tensor] = None,
+        recv_scale_inv: Optional[torch.Tensor] = None,
+        tokens_scale_inv: Optional[torch.Tensor] = None,
+    ) -> Any:
+        return self._tex_fn("ep_prepare_and_dispatch")(
+            handle_mem,
+            topk_idx,
+            tokens,
+            topk_weights,
+            tokens_per_expert,
+            total_recv_tokens,
+            top_k,
+            dispatch_output_per_expert_alignment,
+            recv_tokens,
+            recv_topk_weights,
+            recv_scale_inv,
+            tokens_scale_inv,
+        )
+
+    def ep_dispatch_bwd(
+        self,
+        handle_mem: torch.Tensor,
+        grad: torch.Tensor,
+        g_recv_topk_weights: torch.Tensor,
+        grad_tokens: torch.Tensor,
+        grad_topk_weights: torch.Tensor,
+    ) -> Any:
+        return self._tex_fn("ep_dispatch_bwd")(
+            handle_mem, grad, g_recv_topk_weights, grad_tokens, grad_topk_weights
+        )
+
+    def ep_combine(
+        self,
+        handle_mem: torch.Tensor,
+        expert_out: torch.Tensor,
+        result: torch.Tensor,
+    ) -> Any:
+        return self._tex_fn("ep_combine")(handle_mem, expert_out, result)
+
+    def ep_combine_bwd(
+        self,
+        handle_mem: torch.Tensor,
+        grad: torch.Tensor,
+        grad_expert_out: torch.Tensor,
+        grad_scale_inv: Optional[torch.Tensor] = None,
+        grad_expert_out_scale_inv: Optional[torch.Tensor] = None,
+    ) -> Any:
+        return self._tex_fn("ep_combine_bwd")(
+            handle_mem, grad, grad_expert_out, grad_scale_inv, grad_expert_out_scale_inv
+        )
+
+    def ep_get_zero_copy(self) -> bool:
+        return self._tex_fn("ep_get_zero_copy")()
+
+    def ep_zero_copy_supported(self) -> bool:
+        return self._tex_fn("ep_zero_copy_supported")()
+    ##### END GENERATED OPS #####

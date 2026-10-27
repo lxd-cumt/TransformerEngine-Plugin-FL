@@ -10,6 +10,7 @@ from .normalization import layernorm_fwd_torch, layernorm_bwd_torch
 from .activation import (
     gelu_torch,
     geglu_torch,
+    glu_torch,
     qgelu_torch,
     qgeglu_torch,
     relu_torch,
@@ -21,6 +22,7 @@ from .activation import (
     clamped_swiglu_torch,
     dgelu_torch,
     dgeglu_torch,
+    dglu_torch,
     dqgelu_torch,
     dqgeglu_torch,
     drelu_torch,
@@ -49,6 +51,7 @@ from .softmax import (
 )
 
 from .dropout import dropout_fwd_torch, dropout_bwd_torch
+from .context_parallel import thd_get_partitioned_indices_torch
 
 from .optimizer import (
     multi_tensor_scale_torch,
@@ -71,6 +74,7 @@ __all__ = [
     "layernorm_bwd_torch",
     "gelu_torch",
     "geglu_torch",
+    "glu_torch",
     "qgelu_torch",
     "qgeglu_torch",
     "relu_torch",
@@ -82,6 +86,7 @@ __all__ = [
     "clamped_swiglu_torch",
     "dgelu_torch",
     "dgeglu_torch",
+    "dglu_torch",
     "dqgelu_torch",
     "dqgeglu_torch",
     "drelu_torch",
@@ -106,6 +111,7 @@ __all__ = [
     "scaled_aligned_causal_masked_softmax_backward_torch",
     "dropout_fwd_torch",
     "dropout_bwd_torch",
+    "thd_get_partitioned_indices_torch",
     "multi_tensor_scale_torch",
     "multi_tensor_l2norm_torch",
     "multi_tensor_adam_torch",

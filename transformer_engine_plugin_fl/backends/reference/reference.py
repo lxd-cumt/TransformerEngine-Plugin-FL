@@ -15,6 +15,7 @@ from .impl import (
     layernorm_bwd_torch,
     gelu_torch,
     geglu_torch,
+    glu_torch,
     qgelu_torch,
     qgeglu_torch,
     relu_torch,
@@ -26,6 +27,7 @@ from .impl import (
     clamped_swiglu_torch,
     dgelu_torch,
     dgeglu_torch,
+    dglu_torch,
     dqgelu_torch,
     dqgeglu_torch,
     drelu_torch,
@@ -60,6 +62,7 @@ from .impl import (
     multi_tensor_sgd_torch,
     multi_tensor_compute_scale_and_scale_inv_torch,
     multi_tensor_compute_scale_inv_e8m0_torch,
+    thd_get_partitioned_indices_torch,
 )
 
 
@@ -71,7 +74,7 @@ class ReferenceBackend(TEFLBackendBase):
     def is_available(self) -> bool:
         return True
 
-    def get_attention_backend(self, _attention_params=None):
+    def get_attention_backend(self, attention_params=None):
         from packaging.version import Version as PkgVersion
         from ...logger_manager import get_logger
 
@@ -161,6 +164,9 @@ class ReferenceBackend(TEFLBackendBase):
     def geglu(self, input: torch.Tensor, quantizer: Any) -> Any:
         return geglu_torch(input, quantizer)
 
+    def glu(self, input: torch.Tensor, quantizer: Any) -> Any:
+        return glu_torch(input, quantizer)
+
     def qgelu(self, input: torch.Tensor, quantizer: Any) -> Any:
         return qgelu_torch(input, quantizer)
 
@@ -193,8 +199,9 @@ class ReferenceBackend(TEFLBackendBase):
         quantizer: Any,
         limit: float = 7.0,
         alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
     ) -> Any:
-        return clamped_swiglu_torch(input, quantizer, limit, alpha)
+        return clamped_swiglu_torch(input, quantizer, limit, alpha, glu_linear_offset)
 
     # Backward of GELU and variants
     def dgelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
@@ -202,6 +209,9 @@ class ReferenceBackend(TEFLBackendBase):
 
     def dgeglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         return dgeglu_torch(grad, fwd_input, quantizer)
+
+    def dglu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
+        return dglu_torch(grad, fwd_input, quantizer)
 
     def dqgelu(self, grad: torch.Tensor, fwd_input: torch.Tensor, quantizer: Any) -> Any:
         return dqgelu_torch(grad, fwd_input, quantizer)
@@ -236,8 +246,9 @@ class ReferenceBackend(TEFLBackendBase):
         quantizer: Any,
         limit: float = 7.0,
         alpha: float = 1.702,
+        glu_linear_offset: float = 1.0,
     ) -> Any:
-        return clamped_dswiglu_torch(grad, fwd_input, quantizer, limit, alpha)
+        return clamped_dswiglu_torch(grad, fwd_input, quantizer, limit, alpha, glu_linear_offset)
 
     # DBias + DAct fusions
     def dbias_dgelu(
@@ -370,9 +381,9 @@ class ReferenceBackend(TEFLBackendBase):
     def scaled_softmax_forward(
         self,
         input: torch.Tensor,
-        scale: float,
+        scale_factor: float,
     ) -> torch.Tensor:
-        return scaled_softmax_forward_torch(input, scale)
+        return scaled_softmax_forward_torch(input, scale_factor)
 
     def scaled_softmax_backward(
         self,
@@ -424,38 +435,23 @@ class ReferenceBackend(TEFLBackendBase):
 
     def scaled_aligned_causal_masked_softmax_backward(
         self,
-        output_grad_: torch.Tensor,
+        output_grads_: torch.Tensor,
         softmax_results_: torch.Tensor,
         scale_factor: float,
     ) -> torch.Tensor:
         return scaled_aligned_causal_masked_softmax_backward_torch(
-            output_grad_, softmax_results_, scale_factor
+            output_grads_, softmax_results_, scale_factor
         )
 
     # Fused attention backend
     def get_fused_attn_backend(
         self,
-        _is_training: bool,
-        _q_dtype: DType,
-        _kv_dtype: DType,
-        _qkv_layout: NVTE_QKV_Layout,
-        _bias_type: NVTE_Bias_Type,
-        _attn_mask_type: NVTE_Mask_Type,
-        _softmax_type: NVTE_Softmax_Type,
-        _p_dropout: float,
-        _num_attn_heads: int,
-        _num_gqa_groups: int,
-        _max_seqlen_q: int,
-        _max_seqlen_kv: int,
-        _head_dim_qk: int,
-        _head_dim_v: int,
-        _window_size_left: int,
-        _window_size_right: int,
-        _return_max_logit: bool,
-        _cuda_graph: bool = False,
-        _deterministic: bool = False,
-    ) -> NVTE_Fused_Attn_Backend:
-        return NVTE_Fused_Attn_Backend.NVTE_No_Backend
+        fused_attn_params: Any,
+    ) -> Tuple[NVTE_Fused_Attn_Backend, str]:
+        return (
+            NVTE_Fused_Attn_Backend.NVTE_No_Backend,
+            "reference backend has no fused attention implementation",
+        )
 
     # Dropout
     def dropout_fwd(
@@ -739,6 +735,61 @@ class ReferenceBackend(TEFLBackendBase):
             tensor_lists,
             block_len,
         )
+
+    def convert_thd_to_bshd(
+        self,
+        tensor: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        b: int,
+        max_seq_len: int,
+    ) -> torch.Tensor:
+        """Convert THD (packed tokens) format to BSHD (batched, padded) format."""
+        # tensor shape: [total_tokens, num_heads, head_dim]
+        # output shape: [b, max_seq_len, num_heads, head_dim]
+        remaining_dims = tensor.shape[1:]
+        output = torch.zeros(
+            (b, max_seq_len) + remaining_dims,
+            dtype=tensor.dtype,
+            device=tensor.device,
+        )
+        for i in range(b):
+            start = cu_seqlens[i].item()
+            end = cu_seqlens[i + 1].item()
+            seq_len = end - start
+            output[i, :seq_len] = tensor[start:end]
+        return output
+
+    def thd_get_partitioned_indices(
+        self,
+        cu_seqlens: torch.Tensor,
+        total_tokens: int,
+        world_size: int,
+        rank: int,
+    ) -> torch.Tensor:
+        return thd_get_partitioned_indices_torch(cu_seqlens, total_tokens, world_size, rank)
+
+    def convert_bshd_to_thd(
+        self,
+        tensor: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        t: int,
+    ) -> torch.Tensor:
+        """Convert BSHD (batched, padded) format to THD (packed tokens) format."""
+        # tensor shape: [b, max_seq_len, num_heads, head_dim]
+        # output shape: [t, num_heads, head_dim]
+        b = tensor.shape[0]
+        remaining_dims = tensor.shape[2:]
+        output = torch.zeros(
+            (t,) + remaining_dims,
+            dtype=tensor.dtype,
+            device=tensor.device,
+        )
+        for i in range(b):
+            start = cu_seqlens[i].item()
+            end = cu_seqlens[i + 1].item()
+            seq_len = end - start
+            output[start:end] = tensor[i, :seq_len]
+        return output
 
     def get_flash_attention_class(self):
         from .flash_attention import FlashAttentionTorch

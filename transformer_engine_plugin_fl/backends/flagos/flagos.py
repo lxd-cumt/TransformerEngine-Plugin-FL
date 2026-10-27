@@ -17,11 +17,18 @@ from .impl import (
     multi_tensor_scale_fl,
     multi_tensor_adam_fl,
     multi_tensor_adam_param_remainder_fl,
+    multi_tensor_adam_fp8_fl,
+    multi_tensor_adam_capturable_fl,
+    multi_tensor_adam_capturable_master_fl,
     multi_tensor_l2_norm_fl,
     generic_gemm_fl,
     scaled_masked_softmax_forward_fl,
     scaled_masked_softmax_backward_fl,
     te_general_grouped_gemm_fl,
+    fused_rope_forward_fl,
+    fused_rope_backward_fl,
+    fused_qkv_rope_forward_fl,
+    fused_qkv_rope_backward_fl,
 )
 
 
@@ -136,7 +143,7 @@ class FlagOSBackend(TEFLBackendBase):
         pre_gelu_out: List[torch.Tensor],
         grad: bool,
         workspace: List[torch.Tensor],
-        workspaceSizes: int,
+        workspaceSize: int,
         accumulate: bool,
         use_split_accumulator: bool,
         math_sm_count: int,
@@ -155,7 +162,7 @@ class FlagOSBackend(TEFLBackendBase):
             pre_gelu_out,
             grad,
             workspace,
-            workspaceSizes,
+            workspaceSize,
             accumulate,
             use_split_accumulator,
             math_sm_count,
@@ -246,8 +253,14 @@ class FlagOSBackend(TEFLBackendBase):
             zero_centered_gamma=zero_centered_gamma,
         )
 
-    def get_fused_attn_backend(self, *args, **kwargs) -> int:
-        return NVTE_Fused_Attn_Backend.NVTE_No_Backend
+    def get_fused_attn_backend(
+        self,
+        fused_attn_params: Any,
+    ) -> Tuple[NVTE_Fused_Attn_Backend, str]:
+        return (
+            NVTE_Fused_Attn_Backend.NVTE_No_Backend,
+            "flagos backend has no fused attention implementation",
+        )
 
     # Softmax functions
     def scaled_masked_softmax_forward(
@@ -350,6 +363,191 @@ class FlagOSBackend(TEFLBackendBase):
             mode,
             bias_correction,
             weight_decay,
+        )
+
+    def multi_tensor_adam_fp8(
+        self,
+        chunk_size,
+        noop_flag,
+        tensor_lists,
+        lr,
+        beta1,
+        beta2,
+        epsilon,
+        step,
+        mode,
+        bias_correction,
+        weight_decay,
+        fp8_dtype,
+    ):
+        return multi_tensor_adam_fp8_fl(
+            chunk_size,
+            noop_flag,
+            tensor_lists,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            step,
+            mode,
+            bias_correction,
+            weight_decay,
+            fp8_dtype,
+        )
+
+    def multi_tensor_adam_capturable(
+        self,
+        chunk_size,
+        noop_flag,
+        tensor_lists,
+        lr,
+        beta1,
+        beta2,
+        epsilon,
+        step,
+        mode,
+        bias_correction,
+        weight_decay,
+        inv_scale,
+    ):
+        return multi_tensor_adam_capturable_fl(
+            chunk_size,
+            noop_flag,
+            tensor_lists,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            step,
+            mode,
+            bias_correction,
+            weight_decay,
+            inv_scale,
+        )
+
+    def multi_tensor_adam_capturable_master(
+        self,
+        chunk_size,
+        noop_flag,
+        tensor_lists,
+        lr,
+        beta1,
+        beta2,
+        epsilon,
+        step,
+        mode,
+        bias_correction,
+        weight_decay,
+        inv_scale,
+    ):
+        return multi_tensor_adam_capturable_master_fl(
+            chunk_size,
+            noop_flag,
+            tensor_lists,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            step,
+            mode,
+            bias_correction,
+            weight_decay,
+            inv_scale,
+        )
+
+    # fused apply rope
+    def fused_rope_forward(
+        self,
+        input: torch.Tensor,
+        freqs: torch.Tensor,
+        start_positions: Optional[torch.Tensor],
+        qkv_format: NVTE_QKV_Format,
+        interleaved: bool,
+        cu_seqlens: Optional[torch.Tensor],
+        cp_size: int,
+        cp_rank: int,
+    ) -> torch.Tensor:
+        return fused_rope_forward_fl(
+            input,
+            freqs,
+            start_positions,
+            qkv_format,
+            interleaved,
+            cu_seqlens,
+            cp_size,
+            cp_rank,
+        )
+
+    def fused_rope_backward(
+        self,
+        output_grads: torch.Tensor,
+        freqs: torch.Tensor,
+        start_positions: Optional[torch.Tensor],
+        qkv_format: NVTE_QKV_Format,
+        interleaved: bool,
+        cu_seqlens: Optional[torch.Tensor],
+        cp_size: int,
+        cp_rank: int,
+    ) -> torch.Tensor:
+        return fused_rope_backward_fl(
+            output_grads,
+            freqs,
+            start_positions,
+            qkv_format,
+            interleaved,
+            cu_seqlens,
+            cp_size,
+            cp_rank,
+        )
+
+    def fused_qkv_rope_forward(
+        self,
+        qkv_input: torch.Tensor,
+        q_freqs: torch.Tensor,
+        k_freqs: torch.Tensor,
+        start_positions: Optional[torch.Tensor],
+        qkv_split_arg_list: List[int],
+        qkv_format: NVTE_QKV_Format,
+        interleaved: bool,
+        cp_size: int,
+        cp_rank: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return fused_qkv_rope_forward_fl(
+            qkv_input,
+            q_freqs,
+            k_freqs,
+            start_positions,
+            qkv_split_arg_list,
+            qkv_format,
+            interleaved,
+            cp_size,
+            cp_rank,
+        )
+
+    def fused_qkv_rope_backward(
+        self,
+        q_grad_out: torch.Tensor,
+        k_grad_out: torch.Tensor,
+        v_grad_out: torch.Tensor,
+        q_freqs: torch.Tensor,
+        k_freqs: torch.Tensor,
+        qkv_split_arg_list: List[int],
+        qkv_format: NVTE_QKV_Format,
+        interleaved: bool,
+        cp_size: int,
+        cp_rank: int,
+    ) -> torch.Tensor:
+        return fused_qkv_rope_backward_fl(
+            q_grad_out,
+            k_grad_out,
+            v_grad_out,
+            q_freqs,
+            k_freqs,
+            qkv_split_arg_list,
+            qkv_format,
+            interleaved,
+            cp_size,
+            cp_rank,
         )
 
     # Misc

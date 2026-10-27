@@ -34,6 +34,8 @@ from .ops import (
     NVTE_QKV_Format,
     NVTE_QKV_Layout,
     NVTERoutingMapFormat,
+    NVTEQBHistogramMode,
+    NVTEScalingMode,
     CommOverlapType,
     CommOverlapAlgo,
     FP8TensorMeta,
@@ -43,9 +45,35 @@ from .ops import (
     CommOverlapBase,
     CommOverlapCore,
     CommOverlapP2PBase,
+    TEFLBackendBase,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _te_main_op_names() -> list[str]:
+    """Op names the stub must expose, taken from the TEFLBackendBase interface.
+
+    ``TEFLBackendBase`` mirrors TE main's pybind surface, so reusing it avoids a
+    second list that could fall out of sync. The plugin-internal hooks (backend
+    selection, class factories) are not pybind ops and are filtered out.
+    """
+    skip = {
+        "is_available",
+        "get_attention_backend",
+        "get_flash_attention_class",
+        "create_fp8_tensor_meta",
+        "create_comm_overlap",
+        "create_comm_overlap_helper",
+        "create_comm_overlap_p2p",
+        "convert_host_pointers_to_tensor",
+        "get_device_pointer_for_data_and_scales",
+    }
+    return [
+        name
+        for name in vars(TEFLBackendBase)
+        if not name.startswith("_") and name not in skip and callable(getattr(TEFLBackendBase, name))
+    ]
 
 
 def _make_op_dispatcher(op_name: str):
@@ -88,6 +116,8 @@ def install_stub(manager) -> None:
     stub.NVTE_QKV_Format = NVTE_QKV_Format
     stub.NVTE_QKV_Layout = NVTE_QKV_Layout
     stub.NVTERoutingMapFormat = NVTERoutingMapFormat
+    stub.NVTEQBHistogramMode = NVTEQBHistogramMode
+    stub.NVTEScalingMode = NVTEScalingMode
     stub.CommOverlapType = CommOverlapType
     stub.CommOverlapAlgo = CommOverlapAlgo
 
@@ -104,79 +134,11 @@ def install_stub(manager) -> None:
     for op_name in manager.registry.list_operators():
         setattr(stub, op_name, _make_op_dispatcher(op_name))
 
-    # Ensure all TE main ops have dispatchers even if no backend registered them.
-    # This allows `from transformer_engine_torch import <op>` at import time to succeed.
-    _ALL_TE_MAIN_OPS = [
-        "bgrad_group_quantize", "bgrad_quantize", "bulk_allocate",
-        "bulk_overlap_ag_with_external_gemm", "clamped_dswiglu", "clamped_swiglu",
-        "compute_amax", "convert_bshd_to_thd", "convert_thd_to_bshd",
-        "copy_data_ptrs_to_device", "copy_to_kv_cache",
-        "create_empty_quantized_tensor", "cusolvermp_ctx_create",
-        "cusolvermp_ctx_destroy", "dbias_dgelu", "dbias_dqgelu", "dbias_drelu",
-        "dbias_dsilu", "dbias_dsrelu", "dequantize", "device_supports_multicast",
-        "dgeglu", "dgelu", "dglu", "dqgeglu", "dqgelu", "dreglu", "drelu",
-        "dropout_bwd", "dropout_fwd", "dsilu", "dsreglu", "dsrelu", "dswiglu",
-        "fa_prepare_bwd", "fa_prepare_fwd", "fp8_block_scaling_compute_partial_amax",
-        "fp8_block_scaling_partial_cast", "fp8_transpose",
-        "fused_amax_and_scale_update_after_reduction", "fused_attn_bwd",
-        "fused_attn_fwd", "fused_moe_aux_loss_bwd", "fused_moe_aux_loss_fwd",
-        "fused_moe_aux_loss_fwd_graph_safe", "fused_multi_row_padding",
-        "fused_multi_row_unpadding", "fused_qkv_rope_backward",
-        "fused_qkv_rope_forward", "fused_rope_backward", "fused_rope_forward",
-        "fused_score_for_moe_aux_loss_bwd", "fused_score_for_moe_aux_loss_fwd",
-        "fused_topk_with_score_function_bwd", "fused_topk_with_score_function_fwd",
-        "geglu", "gelu", "generic_gemm", "get_cublasLt_version", "get_cudnn_version",
-        "get_fused_attn_backend", "get_grouped_gemm_setup_workspace_size",
-        "get_num_cublas_streams", "get_stream_priority_range", "glu",
-        "group_dequantize", "group_quantize", "group_requantize_inplace",
-        "grouped_swizzle_for_gemm", "init_nvshmem_backend", "layernorm_bwd",
-        "layernorm_fwd", "moe_permute_bwd", "moe_permute_fwd", "moe_unpermute_bwd",
-        "moe_unpermute_fwd", "multi_tensor_adam", "multi_tensor_adam_capturable",
-        "multi_tensor_adam_capturable_master", "multi_tensor_adam_fp8",
-        "multi_tensor_adam_param_remainder", "multi_tensor_compute_scale_and_scale_inv",
-        "multi_tensor_compute_scale_inv_e8m0", "multi_tensor_l2norm",
-        "multi_tensor_pad_last_dim", "multi_tensor_quantize", "multi_tensor_scale",
-        "multi_tensor_scale_tensor", "multi_tensor_sgd",
-        "multi_tensor_swizzle_scales_for_gemm_",
-        "multi_tensor_swizzle_scales_for_gemm_unchecked_",
-        "multi_tensor_transpose_to_bhsd", "multi_tensor_unscale_l2norm",
-        "mxfp8_scaling_compute_partial_amax", "mxfp8_scaling_partial_cast",
-        "newton_schulz", "nvfp4_2d_compute_partial_amax",
-        "nvfp4_2d_multi_tensor_transpose", "nvfp4_2d_partial_cast",
-        "nvfp4_2d_scale_transpose", "nvfp4_compute_global_scale",
-        "nvfp4_compute_per_block_scale", "nvfp4_data_transpose",
-        "nvfp4_expand_scale_to_fp8", "nvfp4_fused_scale",
-        "nvfp4_group_quantize_with_amax", "nvfp4_multi_tensor_2d_partial_cast",
-        "nvfp4_multi_tensor_compute_partial_amax", "nvfp4_multi_tensor_fused_scale",
-        "nvfp4_quantize_with_amax", "nvshmem_finalize",
-        "nvshmem_send_on_current_stream", "nvshmem_wait_on_current_stream",
-        "nvte_built_with_cublasmp", "qgeglu", "qgelu", "quantize", "reglu", "relu",
-        "rmsnorm_bwd", "rmsnorm_bwd_add", "rmsnorm_fwd",
-        "scaled_aligned_causal_masked_softmax_backward",
-        "scaled_aligned_causal_masked_softmax_forward",
-        "scaled_clamped_dswiglu", "scaled_clamped_swiglu",
-        "scaled_dsrelu", "scaled_dswiglu",
-        "scaled_masked_softmax_backward", "scaled_masked_softmax_forward",
-        "scaled_softmax_backward", "scaled_softmax_forward",
-        "scaled_srelu", "scaled_swiglu",
-        "scaled_upper_triang_masked_softmax_backward",
-        "scaled_upper_triang_masked_softmax_forward",
-        "silu", "split_quantize", "splits_to_offsets", "splits_to_offsets_multi",
-        "sreglu", "srelu", "swap_first_dims", "swiglu",
-        "swizzle_scales_and_pack_ptrs_for_discrete_weights",
-        "swizzle_scales_for_gemm_",
-        "te_general_grouped_gemm", "te_general_grouped_gemm_for_discrete_in",
-        "te_general_grouped_gemm_for_discrete_out",
-        "te_general_grouped_gemm_for_grouped_tensor",
-        "thd_copy_valid_tokens_from_per_split_to_rank_local",
-        "thd_cp_rank_order_to_sequence_order",
-        "thd_get_partitioned_indices", "thd_grad_correction",
-        "thd_out_correction", "thd_read_half_tensor", "thd_read_second_half_lse",
-        "thd_second_half_lse_correction",
-        "thd_sequence_order_to_cp_rank_order",
-        "ubuf_built_with_mpi",
-    ]
-    for op_name in _ALL_TE_MAIN_OPS:
+    # Ensure all TE main ops have dispatchers even if no backend registered them,
+    # so `from transformer_engine_torch import <op>` succeeds at import time.
+    # Derived from TEFLBackendBase rather than a second hand-kept list: that class
+    # is the plugin's mirror of TE main's pybind surface, so the two cannot drift.
+    for op_name in _te_main_op_names():
         if not hasattr(stub, op_name):
             setattr(stub, op_name, _make_op_dispatcher(op_name))
 

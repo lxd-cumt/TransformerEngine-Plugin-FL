@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 
-from transformer_engine.plugin.core.ops import FlashAttentionBase
+from transformer_engine_plugin_fl.ops import FlashAttentionBase
 
 
 class FlashAttentionENFLAME(FlashAttentionBase):

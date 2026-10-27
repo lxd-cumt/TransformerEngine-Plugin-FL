@@ -11,7 +11,23 @@ for all supported operators by calling register_builtins from each backend.
 
 from __future__ import annotations
 
+import importlib
+
 from .registry import OpRegistry
+
+# Vendor backends, registered in order. A backend whose hardware or extension
+# is absent raises on import or reports itself unavailable; that is the normal
+# case on any given machine, so the failure is not surfaced.
+VENDOR_BACKENDS = (
+    "cuda",
+    "enflame",
+    "hygon",
+    "iluvatar",
+    "kunlunxin",
+    "metax",
+    "musa",
+    "npu",
+)
 
 
 def register_builtins(registry: OpRegistry) -> None:
@@ -21,85 +37,26 @@ def register_builtins(registry: OpRegistry) -> None:
     This function registers:
     - DEFAULT implementations (FlagOS/flag_gems)
     - REFERENCE implementations (PyTorch)
-    - VENDOR implementations (CUDA, if available)
+    - VENDOR implementations (one per supported accelerator, when available)
 
     Args:
         registry: Registry to register into
     """
-    # Register FlagOS (DEFAULT) implementations
-    try:
-        from .backends.flagos.register_ops import register_builtins as register_flagos
+    # DEFAULT (FlagOS) and REFERENCE (PyTorch) are always expected to load, so
+    # a failure here is worth reporting.
+    for name, label in (("flagos", "FlagOS"), ("reference", "Reference")):
+        try:
+            module = importlib.import_module(f".backends.{name}.register_ops", __package__)
+            module.register_builtins(registry)
+        except Exception as e:  # pragma: no cover - depends on optional deps
+            print(f"[WARNING] Failed to register {label} operators: {e}")
 
-        register_flagos(registry)
-    except Exception as e:
-        print(f"[WARNING] Failed to register FlagOS operators: {e}")
-
-    # Register PyTorch (REFERENCE) implementations
-    try:
-        from .backends.reference.register_ops import register_builtins as register_reference
-
-        register_reference(registry)
-    except Exception as e:
-        print(f"[WARNING] Failed to register Reference operators: {e}")
-
-    # Register CUDA (VENDOR) implementations
-    try:
-        from .backends.vendor.cuda.register_ops import register_builtins as register_cuda
-
-        register_cuda(registry)
-    except Exception as e:
-        # CUDA may not be available, this is expected
-        pass
-
-    # Register HYGON (VENDOR) implementations
-    try:
-        from .backends.vendor.hygon.register_ops import register_builtins as register_hygon
-
-        register_hygon(registry)
-    except Exception as e:
-        # HYGON may not be available, this is expected
-        pass
-
-    # Register Metax (VENDOR) implementations
-    try:
-        from .backends.vendor.metax.register_ops import register_builtins as register_metax
-
-        register_metax(registry)
-    except Exception as e:
-        # Metax may not be available, this is expected
-        pass
-
-    # Register KUNLUNXIN (VENDOR) implementations
-    try:
-        from .backends.vendor.kunlunxin.register_ops import register_builtins as register_kunlunxin
-
-        register_kunlunxin(registry)
-    except Exception as e:
-        # KunLunXin may not be available, this is expected
-        pass
-
-    # Register Iluvatar (VENDOR) implementations
-    try:
-        from .backends.vendor.iluvatar.register_ops import register_builtins as register_iluvatar
-
-        register_iluvatar(registry)
-    except Exception as e:
-        # Iluvatar may not be available, this is expected
-        pass
-
-    # Register MUSA (VENDOR) implementations
-    try:
-        from .backends.vendor.musa.register_ops import register_builtins as register_musa
-
-        register_musa(registry)
-    except Exception as e:
-        # MUSA may not be available, this is expected
-        pass
-    # Register enflame (VENDOR) implementations
-    try:
-        from .backends.vendor.enflame.register_ops import register_builtins as register_enflame
-
-        register_enflame(registry)
-    except Exception as e:
-        # enflame may not be available, this is expected
-        pass
+    for vendor in VENDOR_BACKENDS:
+        try:
+            module = importlib.import_module(
+                f".backends.vendor.{vendor}.register_ops", __package__
+            )
+            module.register_builtins(registry)
+        except Exception:
+            # The vendor's hardware or extension is not present here.
+            pass
