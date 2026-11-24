@@ -2,12 +2,43 @@
 #
 # See LICENSE for license information.
 
+import math
 import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from ....ops import *
 from ..compat import vendor_te_compat
+
+
+def _norm_matrix(x):
+    """Hygon normalizes a matrix with one row per token."""
+    return x.reshape(math.prod(x.shape[:-1]), x.shape[-1])
+
+
+def _norm_forward(fn, x, params, eps, out, quantizer, dtype, margin, zero_centered):
+    if x.ndim == 2:
+        return fn(x, *params, eps, out, quantizer, dtype, margin, zero_centered)
+
+    matrix = _norm_matrix(x)
+    matrix_out = None
+    if out is not None:
+        if out.shape != x.shape:
+            raise ValueError("normalization output must match the input shape")
+        if type(out) is torch.Tensor and not out.is_contiguous():
+            matrix_out = out.new_empty(matrix.shape)
+        else:
+            matrix_out = out.view(matrix.shape)
+    y, mean, rsigma = fn(
+        matrix, *params, eps, matrix_out, quantizer, dtype, margin, zero_centered
+    )
+    y = y.view(x.shape)
+    if out is not None:
+        if type(out) is torch.Tensor and not out.is_contiguous():
+            out.copy_(y)
+        y = out
+    # Upstream TE returns one FP32 statistic per row, even for N-D input.
+    return [y, mean, rsigma]
 
 
 def _load_hygon_libs():
@@ -779,16 +810,9 @@ class HygonBackend(TEFLBackendBase):
     ) -> List[Any]:
         tex = self._get_tex()
         otype = tex.DType(int(otype)) if otype is not None else None
-        return tex.layernorm_fwd(
-            input,
-            weight,
-            bias,
-            eps,
-            ln_out,
-            quantizer,
-            otype,
-            sm_margin,
-            zero_centered_gamma,
+        return _norm_forward(
+            tex.layernorm_fwd, input, (weight, bias), eps, ln_out, quantizer, otype,
+            sm_margin, zero_centered_gamma,
         )
 
     def layernorm_bwd(
@@ -802,7 +826,11 @@ class HygonBackend(TEFLBackendBase):
         zero_centered_gamma: bool,
     ) -> List[Any]:
         tex = self._get_tex()
-        return tex.layernorm_bwd(dz, x, mu, rsigma, gamma, sm_margin, zero_centered_gamma)
+        dx, dw, db = tex.layernorm_bwd(
+            _norm_matrix(dz), _norm_matrix(x), mu.reshape(-1), rsigma.reshape(-1),
+            gamma, sm_margin, zero_centered_gamma,
+        )
+        return [dx.view(x.shape), dw, db]
 
     def rmsnorm_fwd(
         self,
@@ -817,8 +845,9 @@ class HygonBackend(TEFLBackendBase):
     ) -> List[Any]:
         tex = self._get_tex()
         otype = tex.DType(int(otype)) if otype is not None else None
-        return tex.rmsnorm_fwd(
-            input, weight, eps, ln_out, quantizer, otype, sm_margin, zero_centered_gamma
+        return _norm_forward(
+            tex.rmsnorm_fwd, input, (weight,), eps, ln_out, quantizer, otype,
+            sm_margin, zero_centered_gamma,
         )
 
     def rmsnorm_bwd(
@@ -831,7 +860,11 @@ class HygonBackend(TEFLBackendBase):
         zero_centered_gamma: bool,
     ) -> List[Any]:
         tex = self._get_tex()
-        return tex.rmsnorm_bwd(dz, x, rsigma, gamma, sm_margin, zero_centered_gamma)
+        dx, dw = tex.rmsnorm_bwd(
+            _norm_matrix(dz), _norm_matrix(x), rsigma.reshape(-1), gamma, sm_margin,
+            zero_centered_gamma,
+        )
+        return [dx.view(x.shape), dw]
 
     def rmsnorm_bwd_add(
         self,
@@ -844,7 +877,11 @@ class HygonBackend(TEFLBackendBase):
         zero_centered_gamma: bool,
     ) -> List[Any]:
         tex = self._get_tex()
-        return tex.rmsnorm_bwd_add(dz, x, add, rsigma, gamma, sm_margin, zero_centered_gamma)
+        dx, dw = tex.rmsnorm_bwd_add(
+            _norm_matrix(dz), _norm_matrix(x), _norm_matrix(add), rsigma.reshape(-1),
+            gamma, sm_margin, zero_centered_gamma,
+        )
+        return [dx.view(x.shape), dw]
 
     def multi_tensor_quantize(
         self,
